@@ -1029,9 +1029,18 @@ impl ClientWorld {
     fn build_render_mesh(&self, texture_atlas: &TextureAtlas) -> (Vec<Vertex>, Vec<u32>) {
         let mut chunk_meshes = Vec::with_capacity(self.chunks.len());
         for (position, chunk) in &self.chunks {
-            chunk_meshes.push((*position, self.mesher.mesh_chunk(chunk, &self.blocks)));
+            chunk_meshes.push((*position, self.mesh_chunk_for_render(*position, chunk)));
         }
         build_render_mesh(&chunk_meshes, &self.blocks, texture_atlas)
+    }
+
+    fn mesh_chunk_for_render(&self, chunk_position: ChunkPosition, chunk: &Chunk) -> ChunkMesh {
+        self.mesher
+            .mesh_chunk_with_neighbor_lookup(chunk, &self.blocks, |position, direction| {
+                let world_position =
+                    world_block_position_from_chunk_position(chunk_position, position);
+                self.block(neighbor_world_block_position(world_position, direction))
+            })
     }
 
     fn ground_eye_y(&self, render_x: f32, render_z: f32) -> Option<f32> {
@@ -1176,6 +1185,51 @@ fn world_block_from_render(position: Vec3) -> WorldBlockPosition {
         x: render_x_to_block_world(position.x).floor() as i32,
         y: render_y_to_block_world(position.y).floor() as i32,
         z: render_z_to_block_world(position.z).floor() as i32,
+    }
+}
+
+fn world_block_position_from_chunk_position(
+    chunk_position: ChunkPosition,
+    block_position: BlockPosition,
+) -> WorldBlockPosition {
+    WorldBlockPosition {
+        x: chunk_position.x * CHUNK_SIZE as i32 + block_position.x as i32,
+        y: block_position.y as i32,
+        z: chunk_position.z * CHUNK_SIZE as i32 + block_position.z as i32,
+    }
+}
+
+fn neighbor_world_block_position(
+    position: WorldBlockPosition,
+    direction: crate::engine::mesh::chunk_mesher::FaceDirection,
+) -> WorldBlockPosition {
+    use crate::engine::mesh::chunk_mesher::FaceDirection;
+
+    match direction {
+        FaceDirection::North => WorldBlockPosition {
+            z: position.z - 1,
+            ..position
+        },
+        FaceDirection::South => WorldBlockPosition {
+            z: position.z + 1,
+            ..position
+        },
+        FaceDirection::East => WorldBlockPosition {
+            x: position.x + 1,
+            ..position
+        },
+        FaceDirection::West => WorldBlockPosition {
+            x: position.x - 1,
+            ..position
+        },
+        FaceDirection::Up => WorldBlockPosition {
+            y: position.y + 1,
+            ..position
+        },
+        FaceDirection::Down => WorldBlockPosition {
+            y: position.y - 1,
+            ..position
+        },
     }
 }
 
@@ -1975,6 +2029,90 @@ mod tests {
         assert!(!world.is_solid(position));
         assert!(world.place_block(position, content.block_ids.dirt));
         assert!(world.is_solid(position));
+    }
+
+    #[test]
+    fn client_world_mesh_culls_faces_across_chunk_boundaries() {
+        let content = bootstrap_content().unwrap();
+        let mut world = ClientWorld::new(content.blocks, content.block_ids);
+        let mut west_chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, content.block_ids.air);
+        let mut east_chunk = Chunk::filled(ChunkPosition { x: 1, z: 0 }, content.block_ids.air);
+        west_chunk
+            .set_block(
+                BlockPosition {
+                    x: CHUNK_SIZE - 1,
+                    y: 1,
+                    z: 1,
+                },
+                content.block_ids.stone,
+            )
+            .unwrap();
+        east_chunk
+            .set_block(BlockPosition { x: 0, y: 1, z: 1 }, content.block_ids.stone)
+            .unwrap();
+        world.insert_chunk(west_chunk);
+        world.insert_chunk(east_chunk);
+
+        let west_mesh = world.mesh_chunk_for_render(
+            ChunkPosition { x: 0, z: 0 },
+            world.chunks.get(&ChunkPosition { x: 0, z: 0 }).unwrap(),
+        );
+        let east_mesh = world.mesh_chunk_for_render(
+            ChunkPosition { x: 1, z: 0 },
+            world.chunks.get(&ChunkPosition { x: 1, z: 0 }).unwrap(),
+        );
+
+        assert_eq!(west_mesh.quads.len(), 5);
+        assert_eq!(east_mesh.quads.len(), 5);
+        assert!(
+            !west_mesh
+                .quads
+                .iter()
+                .any(|quad| quad.direction == FaceDirection::East)
+        );
+        assert!(
+            !east_mesh
+                .quads
+                .iter()
+                .any(|quad| quad.direction == FaceDirection::West)
+        );
+    }
+
+    #[test]
+    fn client_world_mesh_exposes_border_face_after_neighbor_breaks() {
+        let content = bootstrap_content().unwrap();
+        let mut world = ClientWorld::new(content.blocks, content.block_ids);
+        let mut west_chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, content.block_ids.air);
+        let mut east_chunk = Chunk::filled(ChunkPosition { x: 1, z: 0 }, content.block_ids.air);
+        west_chunk
+            .set_block(
+                BlockPosition {
+                    x: CHUNK_SIZE - 1,
+                    y: 1,
+                    z: 1,
+                },
+                content.block_ids.stone,
+            )
+            .unwrap();
+        east_chunk
+            .set_block(BlockPosition { x: 0, y: 1, z: 1 }, content.block_ids.stone)
+            .unwrap();
+        world.insert_chunk(west_chunk);
+        world.insert_chunk(east_chunk);
+
+        assert!(world.break_block(WorldBlockPosition { x: 16, y: 1, z: 1 }));
+        let west_mesh = world.mesh_chunk_for_render(
+            ChunkPosition { x: 0, z: 0 },
+            world.chunks.get(&ChunkPosition { x: 0, z: 0 }).unwrap(),
+        );
+
+        assert_eq!(west_mesh.quads.len(), 6);
+        assert!(
+            west_mesh
+                .quads
+                .iter()
+                .any(|quad| quad.direction == FaceDirection::East)
+        );
     }
 
     #[test]

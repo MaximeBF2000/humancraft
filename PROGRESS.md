@@ -107,6 +107,13 @@ Last updated: 2026-06-13
   the full player AABB before accepting a position.
 - Added tests that verify stone texture PNGs load and safe spawn positions do
   not collide with blocks.
+- Extended chunk meshing with a neighbor lookup so visible-face culling also
+  removes hidden faces across chunk boundaries.
+- Updated the windowed client world to mesh chunks against adjacent loaded
+  chunks, so breaking a border block exposes the neighboring block face on the
+  next mesh rebuild.
+- Added regression tests for border-face culling and face re-exposure after a
+  neighboring block is removed.
 
 ## Verified
 
@@ -135,6 +142,8 @@ Last updated: 2026-06-13
 - `cargo test` after fixing the shader pipeline swap and atlas lifetime.
 - `cargo run` launched successfully after the textured shader pipeline fix and
   was stopped with Ctrl-C after startup smoke testing.
+- `cargo fmt` after adding chunk-boundary visible-face culling.
+- `cargo test` after adding chunk-boundary visible-face culling.
 
 ## Next Concrete Steps
 

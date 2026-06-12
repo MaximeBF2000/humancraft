@@ -57,6 +57,15 @@ pub struct ChunkMesher;
 
 impl ChunkMesher {
     pub fn mesh_chunk(&self, chunk: &Chunk, blocks: &BlockRegistry) -> ChunkMesh {
+        self.mesh_chunk_with_neighbor_lookup(chunk, blocks, |_, _| None)
+    }
+
+    pub fn mesh_chunk_with_neighbor_lookup(
+        &self,
+        chunk: &Chunk,
+        blocks: &BlockRegistry,
+        mut outside_neighbor: impl FnMut(BlockPosition, FaceDirection) -> Option<BlockId>,
+    ) -> ChunkMesh {
         let mut mesh = ChunkMesh::default();
 
         for y in 0..CHUNK_HEIGHT {
@@ -78,7 +87,13 @@ impl ChunkMesher {
                         FaceDirection::Up,
                         FaceDirection::Down,
                     ] {
-                        if self.face_is_exposed(chunk, blocks, position, direction) {
+                        if self.face_is_exposed(
+                            chunk,
+                            blocks,
+                            position,
+                            direction,
+                            &mut outside_neighbor,
+                        ) {
                             mesh.quads.push(MeshQuad {
                                 block,
                                 direction,
@@ -99,13 +114,16 @@ impl ChunkMesher {
         blocks: &BlockRegistry,
         position: BlockPosition,
         direction: FaceDirection,
+        outside_neighbor: &mut impl FnMut(BlockPosition, FaceDirection) -> Option<BlockId>,
     ) -> bool {
-        let neighbor = neighbor_position(position, direction);
-        let Some(neighbor_position) = neighbor else {
-            return true;
-        };
+        if let Some(neighbor_position) = neighbor_position(position, direction) {
+            return chunk
+                .block(neighbor_position)
+                .map(|block| !is_occluding_block(block, blocks))
+                .unwrap_or(true);
+        }
 
-        match chunk.block(neighbor_position) {
+        match outside_neighbor(position, direction) {
             Some(block) => !is_occluding_block(block, blocks),
             None => true,
         }
@@ -208,5 +226,34 @@ mod tests {
         let mesh = ChunkMesher.mesh_chunk(&chunk, &content.blocks);
 
         assert_eq!(mesh.quads.len(), 10);
+    }
+
+    #[test]
+    fn outside_opaque_neighbor_hides_chunk_border_face() {
+        let content = bootstrap_content().unwrap();
+        let mut chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, content.block_ids.air);
+        chunk
+            .set_block(
+                BlockPosition {
+                    x: CHUNK_SIZE - 1,
+                    y: 1,
+                    z: 1,
+                },
+                content.block_ids.stone,
+            )
+            .unwrap();
+
+        let mesh =
+            ChunkMesher.mesh_chunk_with_neighbor_lookup(&chunk, &content.blocks, |_, direction| {
+                (direction == FaceDirection::East).then_some(content.block_ids.stone)
+            });
+
+        assert_eq!(mesh.quads.len(), 5);
+        assert!(
+            !mesh
+                .quads
+                .iter()
+                .any(|quad| quad.direction == FaceDirection::East)
+        );
     }
 }
