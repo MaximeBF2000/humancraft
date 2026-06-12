@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create Block Texture"
+  short_description: "Generate 16x16 block face textures"
+  default_prompt: "Use $create-block-texture to generate Minecraft-style block face PNGs."

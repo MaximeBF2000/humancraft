@@ -1,0 +1,160 @@
+# HumanCraft Progress
+
+Last updated: 2026-06-13
+
+## Done
+
+- Read `PRD.md` and `DEV_PHILOSOPHY.md`.
+- Initialized a Rust Cargo project named `humancraft`.
+- Added a library/application split.
+- Added generic registry primitives with duplicate-key protection.
+- Added block and item definitions backed by registries.
+- Added fixed-size chunk storage for `16 x 16 x 256` block IDs.
+- Added a composable world generation pipeline.
+- Added deterministic terrain generation.
+- Added generic ore generation driven by ore definitions.
+- Added initial HumanCraft content through bootstrap registration:
+  - air
+  - grass
+  - dirt
+  - stone
+  - coal ore
+  - iron ore
+  - gold ore
+  - diamond ore
+  - matching starter item definitions
+- Added developer docs for architecture, registries, chunks, and generation.
+- Added unit tests for registries, chunks, generation pipeline, terrain, ores,
+  and content bootstrap.
+- Added `.gitignore` for Cargo build output.
+- Added renderer-neutral chunk meshing with visible-face culling.
+- Added preview artifact export:
+  - ASCII heightmap
+  - PPM heightmap
+  - OBJ chunk mesh
+- Added a terminal playtest mode with movement, mining, and placing.
+- Added native windowed dev mode using `winit` and `wgpu`.
+- Added colored terrain rendering for one generated chunk.
+- Added camera movement using French-layout controls:
+  - `Z` forward
+  - `Q` left
+  - `S` backward
+  - `D` right
+- Fixed windowed movement to use logical keyboard characters instead of
+  physical key positions, so AZERTY `ZQSD` works as intended.
+- Changed the first windowed render from a single exposed chunk to a centered
+  `5 x 5` terrain patch.
+- Hid deep underground side faces in the temporary preview renderer so the
+  initial view reads as terrain rather than a vertical cutaway column.
+- Hid outer render-patch boundary side faces so the finite terrain patch does
+  not show as a sliced chunk wall.
+- Switched the camera projection to wgpu's expected depth range.
+- Replaced arrow-key camera control with captured mouse-look.
+- Added `Esc` pause/menu mode that releases the cursor, shows a simple overlay,
+  and lets `Esc` resume/capture the cursor again.
+- Added a persistent windowed client world that stores generated chunks instead
+  of throwing them away after meshing.
+- Added grounded player-style movement:
+  - `ZQSD` horizontal movement
+  - gravity
+  - `Space` jump
+  - automatic ground following
+- Added center crosshair rendering.
+- Added camera raycasting against blocks.
+- Added left-click block breaking.
+- Added right-click dirt placement.
+- Rebuilds the chunk render mesh after block edits.
+- Replaced height-only ground collision with a small player AABB moved
+  axis-by-axis, so higher blocks block horizontal movement instead of snapping
+  the player to the top surface.
+- Added selected-block outline rendering for the current raycast target.
+- Added directional face shading to make untextured blocks read better.
+- Inspected `textures/blocks/grass` and `textures/blocks/dirt`; texture atlas
+  support is still pending because the renderer does not yet load PNG assets.
+- Added `README.md` with current run/test commands.
+- Generated `textures/blocks/stone` with the `create-block-texture` skill:
+  - top
+  - bottom
+  - front
+  - back
+  - left
+  - right
+- Added block texture metadata to `BlockDefinition` through a reusable
+  `BlockTextures` value.
+- Registered texture data for grass, dirt, and stone in content bootstrap.
+- Added PNG loading through the `image` crate.
+- Added a simple renderer-side block texture atlas for windowed `wgpu`
+  rendering.
+- Extended world render vertices with UV coordinates while keeping chunk
+  meshing renderer-neutral.
+- Updated the world shader to sample block textures and preserve directional
+  face shading.
+- Kept a white/magenta fallback texture path so blocks without PNG assets still
+  render visibly.
+- Added a unit test covering block texture metadata to asset-path mapping.
+- Fixed texture loading to resolve block PNGs from `CARGO_MANIFEST_DIR` instead
+  of the process working directory.
+- Inset atlas UVs by half a texel to avoid edge bleeding between adjacent
+  16 x 16 block textures.
+- Fixed the windowed render pipeline to use the textured block shader. The
+  textured and line shaders had been accidentally swapped, so the atlas loaded
+  successfully but terrain still rendered as flat shaded faces.
+- Kept the underlying GPU atlas texture alive inside `TextureAtlas` instead of
+  storing only the view and sampler.
+- Added startup atlas accounting for loaded texture keys and fallback texture
+  use.
+- Replaced the windowed spawn placement with a safe spawn search that validates
+  the full player AABB before accepting a position.
+- Added tests that verify stone texture PNGs load and safe spawn positions do
+  not collide with blocks.
+
+## Verified
+
+- `cargo fmt`
+- `cargo test`
+- `cargo run -- preview`
+- `printf 'q\n' | cargo run -- play`
+- `cargo check`
+- `cargo check` after adding PNG texture loading.
+- `cargo test` after adding texture metadata, atlas sampling, and the texture
+  path test.
+- `cargo run` launched the native game loop successfully and was stopped with
+  Ctrl-C after smoke testing.
+- `cargo run` launched successfully after the multi-chunk render and AZERTY
+  input fixes.
+- `cargo run` launched successfully after mouse capture and menu overlay changes.
+- `cargo run` launched successfully after grounded movement and block
+  interaction changes.
+- `cargo run` launched successfully after player AABB collision, selected-block
+  outline, and shading changes.
+- `cargo run` launched successfully after texture atlas integration and was
+  stopped with Ctrl-C after startup smoke testing.
+- `cargo test` after fixing texture path resolution and safe spawn placement.
+- `cargo run` launched successfully after the texture/spawn regression fix and
+  was stopped with Ctrl-C after startup smoke testing.
+- `cargo test` after fixing the shader pipeline swap and atlas lifetime.
+- `cargo run` launched successfully after the textured shader pipeline fix and
+  was stopped with Ctrl-C after startup smoke testing.
+
+## Next Concrete Steps
+
+1. Add texture assets and metadata for coal, iron, gold, and diamond ore.
+2. Add hotbar/inventory-backed placement instead of infinite dirt.
+3. Add more complete swept collision and step-up behavior.
+4. Replace face-per-block meshing with greedy meshing or atlas-aware batching
+   once render distance grows.
+5. Add biome definitions and a biome stage before expanding terrain content.
+6. Replace temporary value noise with the planned `noise` crate.
+7. Add a small in-game debug overlay showing selected block key and position.
+
+## Notes
+
+- The project directory name contains a dot, so Cargo was initialized with
+  `--name humancraft`.
+- Cargo VCS initialization was disabled because the sandbox would not allow
+  creating `.git`.
+- Rendering now samples PNG textures for grass, dirt, and stone in windowed
+  mode. Ore blocks still use the fallback color path until ore textures are
+  generated and registered.
+- The current atlas is intentionally simple: all block faces are expected to be
+  16 x 16 RGBA PNGs.
