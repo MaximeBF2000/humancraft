@@ -15,6 +15,7 @@ The chunk mesher converts chunk block IDs into renderer-neutral visible faces.
 
 - `Chunk`
 - `BlockRegistry`
+- Optional outside-neighbor block lookup for cross-chunk face culling.
 
 ## Outputs
 
@@ -32,10 +33,10 @@ The chunk mesher converts chunk block IDs into renderer-neutral visible faces.
 - Add texture atlas coordinates.
 - Add lighting values.
 - Add ambient occlusion data.
-- Add neighbor-chunk lookups so borders can be culled against adjacent chunks.
+- Add chunk-section dirty tracking so border edits can remesh only affected
+  chunks.
 
 ## Known Limitations
 
 - This is not greedy meshing yet.
-- Chunk borders are always considered exposed.
 - Quads do not include UVs, normals, lighting, or material IDs yet.

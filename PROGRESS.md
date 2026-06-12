@@ -114,6 +114,16 @@ Last updated: 2026-06-13
   next mesh rebuild.
 - Added regression tests for border-face culling and face re-exposure after a
   neighboring block is removed.
+- Added simple infinite-world streaming in the windowed client:
+  - `ClientWorld` owns the generation pipeline and context.
+  - Missing chunks are generated deterministically around the player as they
+    move.
+  - Generated chunks remain resident for now; unload/save policy is still a
+    future system.
+  - The temporary outer-boundary render filter now follows the loaded chunk
+    bounds instead of a hard-coded startup patch.
+- Added tests for render-to-chunk coordinate mapping, chunk streaming, and
+  deterministic distant chunk generation.
 
 ## Verified
 
@@ -144,6 +154,8 @@ Last updated: 2026-06-13
   was stopped with Ctrl-C after startup smoke testing.
 - `cargo fmt` after adding chunk-boundary visible-face culling.
 - `cargo test` after adding chunk-boundary visible-face culling.
+- `cargo fmt` after adding simple infinite-world chunk streaming.
+- `cargo test` after adding simple infinite-world chunk streaming.
 
 ## Next Concrete Steps
 
@@ -154,7 +166,10 @@ Last updated: 2026-06-13
    once render distance grows.
 5. Add biome definitions and a biome stage before expanding terrain content.
 6. Replace temporary value noise with the planned `noise` crate.
-7. Add a small in-game debug overlay showing selected block key and position.
+7. Add an unload/save policy for generated chunks before render distance grows
+   much further.
+8. Add a small in-game debug overlay showing selected block key, player chunk,
+   loaded chunk count, and selected block position.
 
 ## Notes
 

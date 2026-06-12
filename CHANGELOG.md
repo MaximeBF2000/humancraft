@@ -31,10 +31,14 @@ status file for verification notes, next steps, and implementation details.
 - Extended visible-face culling across loaded chunk boundaries in the windowed
   renderer, including re-exposing faces after neighboring border blocks are
   removed.
+- Added simple infinite-world streaming to the windowed client: chunks are
+  generated deterministically around the player as they move, and the temporary
+  outer-boundary render filter now follows the loaded chunk bounds.
 - Updated `PROGRESS.md` throughout the work with implementation notes,
   verification results, and next steps.
 - Added and ran tests covering texture metadata mapping, real stone PNG
-  loading, and safe spawn placement.
+  loading, safe spawn placement, chunk streaming, and deterministic distant
+  chunk generation.
 
 ### Project Setup
 
@@ -89,6 +93,9 @@ status file for verification notes, next steps, and implementation details.
 - Extended the renderer-neutral chunk mesher with an optional outside-neighbor
   lookup so systems can cull hidden faces across chunk boundaries without
   moving visibility rules into GPU code.
+- Added a simple client-side chunk streaming loop that keeps a square chunk
+  window loaded around the player and generates missing chunks through the
+  reusable world generation pipeline.
 
 ### Player And Interaction
 

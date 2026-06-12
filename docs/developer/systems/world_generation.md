@@ -16,6 +16,8 @@ generation.
 - Apply stages in configured order.
 - Keep stage behavior generic.
 - Let content supply block IDs and ore distribution definitions.
+- Generate chunks deterministically from world seed and chunk position so client
+  systems can request new terrain as the player moves.
 
 ## Inputs
 
@@ -37,6 +39,7 @@ generation.
 - Replace temporary value noise with the planned `noise` crate.
 - Add biome, cave, water, tree, decoration, and structure stages.
 - Move generation settings to serialized data files.
+- Add chunk streaming policy for unloading, persistence, and save/load.
 
 ## Known Limitations
 
@@ -44,3 +47,5 @@ generation.
 - Terrain does not interpolate between sample points.
 - Ore distribution is value-noise based, not vein based.
 - There are no biomes, caves, water, trees, or decorations yet.
+- The windowed client keeps generated chunks resident; there is no unload or
+  persistence policy yet.

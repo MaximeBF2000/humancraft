@@ -17,7 +17,7 @@ use winit::window::{CursorGrabMode, Window, WindowAttributes, WindowId};
 
 use crate::content::{BlockIds, bootstrap_content, default_generation_pipeline};
 use crate::engine::mesh::chunk_mesher::{ChunkMesh, ChunkMesher};
-use crate::engine::world::generation::GenerationContext;
+use crate::engine::world::generation::{GenerationContext, GenerationPipeline};
 use crate::engine::world::{
     BlockId, BlockPosition, BlockRegistry, CHUNK_HEIGHT, CHUNK_SIZE, Chunk, ChunkPosition,
 };
@@ -122,11 +122,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 }
 "#;
 
-const RENDER_MIN_CHUNK: i32 = -2;
-const RENDER_MAX_CHUNK: i32 = 2;
+const CLIENT_RENDER_DISTANCE_CHUNKS: i32 = 2;
 const CHUNK_WORLD_SIZE: f32 = 16.0;
-const RENDER_MIN_WORLD: f32 = RENDER_MIN_CHUNK as f32 * CHUNK_WORLD_SIZE;
-const RENDER_MAX_WORLD: f32 = (RENDER_MAX_CHUNK + 1) as f32 * CHUNK_WORLD_SIZE;
 const PLAYER_HEIGHT: f32 = 1.8;
 const PLAYER_EYE_HEIGHT: f32 = 1.62;
 const PLAYER_RADIUS: f32 = 0.3;
@@ -317,21 +314,19 @@ impl RenderState {
             seed: 1,
             air: content.block_ids.air,
         };
-        let mut world = ClientWorld::new(content.blocks.clone(), content.block_ids);
-        for chunk_z in RENDER_MIN_CHUNK..=RENDER_MAX_CHUNK {
-            for chunk_x in RENDER_MIN_CHUNK..=RENDER_MAX_CHUNK {
-                let position = ChunkPosition {
-                    x: chunk_x,
-                    z: chunk_z,
-                };
-                let chunk = pipeline.generate_chunk(position, &generation_context);
-                world.insert_chunk(chunk);
-            }
-        }
+        let mut world = ClientWorld::new(
+            content.blocks.clone(),
+            content.block_ids,
+            pipeline,
+            generation_context,
+            CLIENT_RENDER_DISTANCE_CHUNKS,
+        );
+        let preferred_spawn = Vec3::new(0.0, 0.0, 20.0);
+        world.ensure_chunks_around_render_position(preferred_spawn);
         let texture_atlas = TextureAtlas::load(&device, &queue, &content.blocks);
         let (vertices, indices) = world.build_render_mesh(&texture_atlas);
 
-        let camera = Camera::new(world.safe_spawn_eye_position(Vec3::new(0.0, 0.0, 20.0)));
+        let camera = Camera::new(world.safe_spawn_eye_position(preferred_spawn));
         let camera_uniform =
             CameraUniform::new(camera.view_projection(config.width, config.height));
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -686,8 +681,18 @@ impl RenderState {
         let now = Instant::now();
         let delta_seconds = now.duration_since(self.last_frame).as_secs_f32().min(0.1);
         self.last_frame = now;
+        let mut world_changed = false;
         if !self.paused {
+            world_changed |= self
+                .world
+                .ensure_chunks_around_render_position(self.camera.position);
             self.camera.update(&self.input, &self.world, delta_seconds);
+            world_changed |= self
+                .world
+                .ensure_chunks_around_render_position(self.camera.position);
+        }
+        if world_changed {
+            self.rebuild_world_mesh();
         }
         self.update_target_outline();
         let uniform = CameraUniform::new(
@@ -979,21 +984,56 @@ struct ClientWorld {
     chunks: HashMap<ChunkPosition, Chunk>,
     blocks: BlockRegistry,
     block_ids: BlockIds,
+    generation_pipeline: GenerationPipeline,
+    generation_context: GenerationContext,
+    render_distance_chunks: i32,
     mesher: ChunkMesher,
 }
 
 impl ClientWorld {
-    fn new(blocks: BlockRegistry, block_ids: BlockIds) -> Self {
+    fn new(
+        blocks: BlockRegistry,
+        block_ids: BlockIds,
+        generation_pipeline: GenerationPipeline,
+        generation_context: GenerationContext,
+        render_distance_chunks: i32,
+    ) -> Self {
         Self {
             chunks: HashMap::new(),
             blocks,
             block_ids,
+            generation_pipeline,
+            generation_context,
+            render_distance_chunks,
             mesher: ChunkMesher,
         }
     }
 
     fn insert_chunk(&mut self, chunk: Chunk) {
         self.chunks.insert(chunk.position(), chunk);
+    }
+
+    fn ensure_chunks_around_render_position(&mut self, position: Vec3) -> bool {
+        let center = chunk_position_for_render_position(position);
+        let mut generated_any = false;
+
+        for z in center.z - self.render_distance_chunks..=center.z + self.render_distance_chunks {
+            for x in center.x - self.render_distance_chunks..=center.x + self.render_distance_chunks
+            {
+                let chunk_position = ChunkPosition { x, z };
+                if self.chunks.contains_key(&chunk_position) {
+                    continue;
+                }
+
+                let chunk = self
+                    .generation_pipeline
+                    .generate_chunk(chunk_position, &self.generation_context);
+                self.insert_chunk(chunk);
+                generated_any = true;
+            }
+        }
+
+        generated_any
     }
 
     fn safe_spawn_eye_position(&self, preferred_position: Vec3) -> Vec3 {
@@ -1188,6 +1228,20 @@ fn world_block_from_render(position: Vec3) -> WorldBlockPosition {
     }
 }
 
+fn chunk_position_for_render_position(position: Vec3) -> ChunkPosition {
+    chunk_position_for_world_xz(
+        render_x_to_block_world(position.x).floor() as i32,
+        render_z_to_block_world(position.z).floor() as i32,
+    )
+}
+
+fn chunk_position_for_world_xz(x: i32, z: i32) -> ChunkPosition {
+    ChunkPosition {
+        x: x.div_euclid(CHUNK_SIZE as i32),
+        z: z.div_euclid(CHUNK_SIZE as i32),
+    }
+}
+
 fn world_block_position_from_chunk_position(
     chunk_position: ChunkPosition,
     block_position: BlockPosition,
@@ -1252,10 +1306,7 @@ fn split_world_block_position(
         return None;
     }
 
-    let chunk_position = ChunkPosition {
-        x: position.x.div_euclid(CHUNK_SIZE as i32),
-        z: position.z.div_euclid(CHUNK_SIZE as i32),
-    };
+    let chunk_position = chunk_position_for_world_xz(position.x, position.z);
     let block_position = BlockPosition {
         x: position.x.rem_euclid(CHUNK_SIZE as i32) as usize,
         y: position.y as usize,
@@ -1497,6 +1548,7 @@ fn build_render_mesh(
     blocks: &BlockRegistry,
     texture_atlas: &TextureAtlas,
 ) -> (Vec<Vertex>, Vec<u32>) {
+    let render_bounds = RenderChunkBounds::from_chunk_meshes(chunk_meshes);
     let quad_count = chunk_meshes
         .iter()
         .map(|(_, mesh)| mesh.quads.len())
@@ -1508,7 +1560,7 @@ fn build_render_mesh(
         let chunk_offset_x = chunk_position.x as f32 * 16.0;
         let chunk_offset_z = chunk_position.z as f32 * 16.0;
         for quad in &mesh.quads {
-            if !should_render_preview_quad(quad, *chunk_position) {
+            if !should_render_preview_quad(quad, *chunk_position, render_bounds) {
                 continue;
             }
 
@@ -1533,16 +1585,47 @@ fn build_render_mesh(
     (vertices, indices)
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+struct RenderChunkBounds {
+    min_x: i32,
+    max_x: i32,
+    min_z: i32,
+    max_z: i32,
+}
+
+impl RenderChunkBounds {
+    fn from_chunk_meshes(chunk_meshes: &[(ChunkPosition, ChunkMesh)]) -> Option<Self> {
+        let mut positions = chunk_meshes.iter().map(|(position, _)| *position);
+        let first = positions.next()?;
+        let mut bounds = Self {
+            min_x: first.x,
+            max_x: first.x,
+            min_z: first.z,
+            max_z: first.z,
+        };
+
+        for position in positions {
+            bounds.min_x = bounds.min_x.min(position.x);
+            bounds.max_x = bounds.max_x.max(position.x);
+            bounds.min_z = bounds.min_z.min(position.z);
+            bounds.max_z = bounds.max_z.max(position.z);
+        }
+
+        Some(bounds)
+    }
+}
+
 fn should_render_preview_quad(
     quad: &crate::engine::mesh::chunk_mesher::MeshQuad,
     chunk_position: ChunkPosition,
+    render_bounds: Option<RenderChunkBounds>,
 ) -> bool {
     use crate::engine::mesh::chunk_mesher::FaceDirection;
 
     match quad.direction {
         FaceDirection::Up => true,
         FaceDirection::North | FaceDirection::South | FaceDirection::East | FaceDirection::West => {
-            if is_outer_render_boundary(quad, chunk_position) {
+            if is_outer_render_boundary(quad, chunk_position, render_bounds) {
                 return false;
             }
             quad.vertices
@@ -1558,28 +1641,37 @@ fn should_render_preview_quad(
 fn is_outer_render_boundary(
     quad: &crate::engine::mesh::chunk_mesher::MeshQuad,
     chunk_position: ChunkPosition,
+    render_bounds: Option<RenderChunkBounds>,
 ) -> bool {
     use crate::engine::mesh::chunk_mesher::FaceDirection;
 
+    let Some(render_bounds) = render_bounds else {
+        return false;
+    };
+
     let offset_x = chunk_position.x as f32 * CHUNK_WORLD_SIZE;
     let offset_z = chunk_position.z as f32 * CHUNK_WORLD_SIZE;
+    let render_min_world_x = render_bounds.min_x as f32 * CHUNK_WORLD_SIZE;
+    let render_max_world_x = (render_bounds.max_x + 1) as f32 * CHUNK_WORLD_SIZE;
+    let render_min_world_z = render_bounds.min_z as f32 * CHUNK_WORLD_SIZE;
+    let render_max_world_z = (render_bounds.max_z + 1) as f32 * CHUNK_WORLD_SIZE;
     match quad.direction {
         FaceDirection::West => quad
             .vertices
             .iter()
-            .all(|vertex| nearly_equal(vertex[0] + offset_x, RENDER_MIN_WORLD)),
+            .all(|vertex| nearly_equal(vertex[0] + offset_x, render_min_world_x)),
         FaceDirection::East => quad
             .vertices
             .iter()
-            .all(|vertex| nearly_equal(vertex[0] + offset_x, RENDER_MAX_WORLD)),
+            .all(|vertex| nearly_equal(vertex[0] + offset_x, render_max_world_x)),
         FaceDirection::North => quad
             .vertices
             .iter()
-            .all(|vertex| nearly_equal(vertex[2] + offset_z, RENDER_MIN_WORLD)),
+            .all(|vertex| nearly_equal(vertex[2] + offset_z, render_min_world_z)),
         FaceDirection::South => quad
             .vertices
             .iter()
-            .all(|vertex| nearly_equal(vertex[2] + offset_z, RENDER_MAX_WORLD)),
+            .all(|vertex| nearly_equal(vertex[2] + offset_z, render_max_world_z)),
         FaceDirection::Up | FaceDirection::Down => false,
     }
 }
@@ -1881,8 +1973,21 @@ fn fallback_texture_pixels(key: &str) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::content::bootstrap_content;
+    use crate::content::{GameContent, bootstrap_content, default_generation_pipeline};
     use crate::engine::mesh::chunk_mesher::{FaceDirection, MeshQuad};
+
+    fn test_client_world(content: &GameContent) -> ClientWorld {
+        ClientWorld::new(
+            content.blocks.clone(),
+            content.block_ids,
+            default_generation_pipeline(content.block_ids),
+            GenerationContext {
+                seed: 1,
+                air: content.block_ids.air,
+            },
+            CLIENT_RENDER_DISTANCE_CHUNKS,
+        )
+    }
 
     #[test]
     fn logical_zqsd_controls_drive_movement() {
@@ -1942,15 +2047,18 @@ mod tests {
 
         assert!(!should_render_preview_quad(
             &wall,
-            ChunkPosition { x: 0, z: 0 }
+            ChunkPosition { x: 0, z: 0 },
+            None
         ));
         assert!(should_render_preview_quad(
             &surface_side,
-            ChunkPosition { x: 0, z: 0 }
+            ChunkPosition { x: 0, z: 0 },
+            None
         ));
         assert!(should_render_preview_quad(
             &top,
-            ChunkPosition { x: 0, z: 0 }
+            ChunkPosition { x: 0, z: 0 },
+            None
         ));
     }
 
@@ -1976,20 +2084,22 @@ mod tests {
             ],
             ..outer_west_wall.clone()
         };
+        let bounds = Some(RenderChunkBounds {
+            min_x: -4,
+            max_x: 0,
+            min_z: -2,
+            max_z: 2,
+        });
 
         assert!(!should_render_preview_quad(
             &outer_west_wall,
-            ChunkPosition {
-                x: RENDER_MIN_CHUNK,
-                z: 0
-            }
+            ChunkPosition { x: -4, z: 0 },
+            bounds
         ));
         assert!(should_render_preview_quad(
             &inner_west_wall,
-            ChunkPosition {
-                x: RENDER_MIN_CHUNK,
-                z: 0
-            }
+            ChunkPosition { x: -4, z: 0 },
+            bounds
         ));
     }
 
@@ -2014,9 +2124,60 @@ mod tests {
     }
 
     #[test]
+    fn render_positions_map_to_chunk_positions() {
+        assert_eq!(
+            chunk_position_for_render_position(Vec3::new(0.0, 0.0, 0.0)),
+            ChunkPosition { x: 0, z: 0 }
+        );
+        assert_eq!(
+            chunk_position_for_render_position(Vec3::new(-9.0, 0.0, -9.0)),
+            ChunkPosition { x: -1, z: -1 }
+        );
+    }
+
+    #[test]
+    fn client_world_generates_chunks_around_player_position() {
+        let content = bootstrap_content().unwrap();
+        let mut world = test_client_world(&content);
+
+        assert!(world.ensure_chunks_around_render_position(Vec3::new(0.0, 0.0, 0.0)));
+        assert_eq!(world.chunks.len(), 25);
+        assert!(!world.ensure_chunks_around_render_position(Vec3::new(0.0, 0.0, 0.0)));
+        assert_eq!(world.chunks.len(), 25);
+
+        assert!(world.ensure_chunks_around_render_position(Vec3::new(80.0, 0.0, -72.0)));
+        assert!(world.chunks.contains_key(&ChunkPosition { x: 5, z: -4 }));
+        assert!(world.chunks.len() > 25);
+    }
+
+    #[test]
+    fn generated_distant_chunks_are_deterministic() {
+        let content = bootstrap_content().unwrap();
+        let mut world = test_client_world(&content);
+        let position = Vec3::new(112.0, 0.0, -96.0);
+
+        world.ensure_chunks_around_render_position(position);
+        let first_block = world.block(WorldBlockPosition {
+            x: 120,
+            y: 64,
+            z: -88,
+        });
+
+        let mut other_world = test_client_world(&content);
+        other_world.ensure_chunks_around_render_position(position);
+        let second_block = other_world.block(WorldBlockPosition {
+            x: 120,
+            y: 64,
+            z: -88,
+        });
+
+        assert_eq!(first_block, second_block);
+    }
+
+    #[test]
     fn client_world_can_break_and_place_blocks() {
         let content = bootstrap_content().unwrap();
-        let mut world = ClientWorld::new(content.blocks, content.block_ids);
+        let mut world = test_client_world(&content);
         let mut chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, content.block_ids.air);
         chunk
             .set_block(BlockPosition { x: 1, y: 1, z: 1 }, content.block_ids.stone)
@@ -2034,7 +2195,7 @@ mod tests {
     #[test]
     fn client_world_mesh_culls_faces_across_chunk_boundaries() {
         let content = bootstrap_content().unwrap();
-        let mut world = ClientWorld::new(content.blocks, content.block_ids);
+        let mut world = test_client_world(&content);
         let mut west_chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, content.block_ids.air);
         let mut east_chunk = Chunk::filled(ChunkPosition { x: 1, z: 0 }, content.block_ids.air);
         west_chunk
@@ -2081,7 +2242,7 @@ mod tests {
     #[test]
     fn client_world_mesh_exposes_border_face_after_neighbor_breaks() {
         let content = bootstrap_content().unwrap();
-        let mut world = ClientWorld::new(content.blocks, content.block_ids);
+        let mut world = test_client_world(&content);
         let mut west_chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, content.block_ids.air);
         let mut east_chunk = Chunk::filled(ChunkPosition { x: 1, z: 0 }, content.block_ids.air);
         west_chunk
@@ -2118,7 +2279,7 @@ mod tests {
     #[test]
     fn player_aabb_detects_wall_collision_without_surface_snap() {
         let content = bootstrap_content().unwrap();
-        let mut world = ClientWorld::new(content.blocks, content.block_ids);
+        let mut world = test_client_world(&content);
         let mut chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, content.block_ids.air);
         chunk
             .set_block(BlockPosition { x: 8, y: 64, z: 8 }, content.block_ids.stone)
@@ -2135,7 +2296,7 @@ mod tests {
     #[test]
     fn safe_spawn_position_does_not_collide_with_blocks() {
         let content = bootstrap_content().unwrap();
-        let mut world = ClientWorld::new(content.blocks, content.block_ids);
+        let mut world = test_client_world(&content);
         let mut chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, content.block_ids.air);
         for y in 0..=64 {
             chunk
@@ -2166,7 +2327,7 @@ mod tests {
     #[test]
     fn raycast_returns_hit_and_previous_empty_block() {
         let content = bootstrap_content().unwrap();
-        let mut world = ClientWorld::new(content.blocks, content.block_ids);
+        let mut world = test_client_world(&content);
         let mut chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, content.block_ids.air);
         chunk
             .set_block(BlockPosition { x: 4, y: 65, z: 4 }, content.block_ids.stone)
