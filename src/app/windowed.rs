@@ -1,6 +1,6 @@
 //! Native windowed client using winit and wgpu.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -236,9 +236,7 @@ struct RenderState {
     texture_bind_group: wgpu::BindGroup,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
-    vertex_buffer: wgpu::Buffer,
-    index_buffer: wgpu::Buffer,
-    index_count: u32,
+    chunk_buffers: HashMap<ChunkPosition, ChunkRenderBuffer>,
     menu_vertex_buffer: wgpu::Buffer,
     menu_index_buffer: wgpu::Buffer,
     menu_index_count: u32,
@@ -322,9 +320,8 @@ impl RenderState {
             CLIENT_RENDER_DISTANCE_CHUNKS,
         );
         let preferred_spawn = Vec3::new(0.0, 0.0, 20.0);
-        world.ensure_chunks_around_render_position(preferred_spawn);
+        let generated_chunks = world.ensure_chunks_around_render_position(preferred_spawn);
         let texture_atlas = TextureAtlas::load(&device, &queue, &content.blocks);
-        let (vertices, indices) = world.build_render_mesh(&texture_atlas);
 
         let camera = Camera::new(world.safe_spawn_eye_position(preferred_spawn));
         let camera_uniform =
@@ -530,16 +527,8 @@ impl RenderState {
             multiview: None,
             cache: None,
         });
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Chunk Vertex Buffer"),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Chunk Index Buffer"),
-            contents: bytemuck::cast_slice(&indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let chunk_buffers =
+            build_chunk_render_buffers(&device, &world, &texture_atlas, &generated_chunks);
         let (menu_vertices, menu_indices) = build_menu_mesh();
         let menu_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Menu Vertex Buffer"),
@@ -586,9 +575,7 @@ impl RenderState {
             texture_bind_group,
             camera_buffer,
             camera_bind_group,
-            vertex_buffer,
-            index_buffer,
-            index_count: indices.len() as u32,
+            chunk_buffers,
             menu_vertex_buffer,
             menu_index_buffer,
             menu_index_count: menu_indices.len() as u32,
@@ -651,16 +638,16 @@ impl RenderState {
             return;
         };
 
-        let changed = match button {
+        let dirty_chunks = match button {
             MouseButton::Left => self.world.break_block(hit.block),
             MouseButton::Right => self
                 .world
                 .place_block(hit.previous, self.world.block_ids.dirt),
-            _ => false,
+            _ => Vec::new(),
         };
 
-        if changed {
-            self.rebuild_world_mesh();
+        if !dirty_chunks.is_empty() {
+            self.rebuild_chunk_meshes(&dirty_chunks);
         }
     }
 
@@ -681,18 +668,20 @@ impl RenderState {
         let now = Instant::now();
         let delta_seconds = now.duration_since(self.last_frame).as_secs_f32().min(0.1);
         self.last_frame = now;
-        let mut world_changed = false;
+        let mut dirty_chunks = Vec::new();
         if !self.paused {
-            world_changed |= self
-                .world
-                .ensure_chunks_around_render_position(self.camera.position);
+            dirty_chunks.extend(
+                self.world
+                    .ensure_chunks_around_render_position(self.camera.position),
+            );
             self.camera.update(&self.input, &self.world, delta_seconds);
-            world_changed |= self
-                .world
-                .ensure_chunks_around_render_position(self.camera.position);
+            dirty_chunks.extend(
+                self.world
+                    .ensure_chunks_around_render_position(self.camera.position),
+            );
         }
-        if world_changed {
-            self.rebuild_world_mesh();
+        if !dirty_chunks.is_empty() {
+            self.rebuild_chunk_meshes(&dirty_chunks);
         }
         self.update_target_outline();
         let uniform = CameraUniform::new(
@@ -745,9 +734,17 @@ impl RenderState {
             pass.set_pipeline(&self.render_pipeline);
             pass.set_bind_group(0, &self.camera_bind_group, &[]);
             pass.set_bind_group(1, &self.texture_bind_group, &[]);
-            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..self.index_count, 0, 0..1);
+            for chunk_buffer in self.chunk_buffers.values() {
+                if chunk_buffer.index_count == 0 {
+                    continue;
+                }
+                pass.set_vertex_buffer(0, chunk_buffer.vertex_buffer.slice(..));
+                pass.set_index_buffer(
+                    chunk_buffer.index_buffer.slice(..),
+                    wgpu::IndexFormat::Uint32,
+                );
+                pass.draw_indexed(0..chunk_buffer.index_count, 0, 0..1);
+            }
 
             if self.outline_vertex_count > 0 {
                 pass.set_pipeline(&self.line_pipeline);
@@ -776,23 +773,20 @@ impl RenderState {
         Ok(())
     }
 
-    fn rebuild_world_mesh(&mut self) {
-        let (vertices, indices) = self.world.build_render_mesh(&self.texture_atlas);
-        self.vertex_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Chunk Vertex Buffer"),
-                contents: bytemuck::cast_slice(&vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-        self.index_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Chunk Index Buffer"),
-                contents: bytemuck::cast_slice(&indices),
-                usage: wgpu::BufferUsages::INDEX,
-            });
-        self.index_count = indices.len() as u32;
+    fn rebuild_chunk_meshes(&mut self, dirty_chunks: &[ChunkPosition]) {
+        for chunk_position in unique_loaded_chunk_positions(dirty_chunks, &self.world) {
+            let Some((vertices, indices)) = self
+                .world
+                .build_chunk_render_mesh(chunk_position, &self.texture_atlas)
+            else {
+                self.chunk_buffers.remove(&chunk_position);
+                continue;
+            };
+            self.chunk_buffers.insert(
+                chunk_position,
+                ChunkRenderBuffer::new(&self.device, chunk_position, &vertices, &indices),
+            );
+        }
     }
 
     fn update_target_outline(&mut self) {
@@ -816,6 +810,92 @@ impl RenderState {
             self.outline_vertex_count = 0;
         }
     }
+}
+
+struct ChunkRenderBuffer {
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    index_count: u32,
+}
+
+impl ChunkRenderBuffer {
+    fn new(
+        device: &wgpu::Device,
+        chunk_position: ChunkPosition,
+        vertices: &[Vertex],
+        indices: &[u32],
+    ) -> Self {
+        let vertex_label = format!("Chunk Vertex Buffer {chunk_position:?}");
+        let index_label = format!("Chunk Index Buffer {chunk_position:?}");
+        let vertex_buffer = if vertices.is_empty() {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(&vertex_label),
+                size: 4,
+                usage: wgpu::BufferUsages::VERTEX,
+                mapped_at_creation: false,
+            })
+        } else {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&vertex_label),
+                contents: bytemuck::cast_slice(vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            })
+        };
+        let index_buffer = if indices.is_empty() {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(&index_label),
+                size: 4,
+                usage: wgpu::BufferUsages::INDEX,
+                mapped_at_creation: false,
+            })
+        } else {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&index_label),
+                contents: bytemuck::cast_slice(indices),
+                usage: wgpu::BufferUsages::INDEX,
+            })
+        };
+
+        Self {
+            vertex_buffer,
+            index_buffer,
+            index_count: indices.len() as u32,
+        }
+    }
+}
+
+fn build_chunk_render_buffers(
+    device: &wgpu::Device,
+    world: &ClientWorld,
+    texture_atlas: &TextureAtlas,
+    chunk_positions: &[ChunkPosition],
+) -> HashMap<ChunkPosition, ChunkRenderBuffer> {
+    let mut buffers = HashMap::new();
+    for chunk_position in unique_loaded_chunk_positions(chunk_positions, world) {
+        if let Some((vertices, indices)) =
+            world.build_chunk_render_mesh(chunk_position, texture_atlas)
+        {
+            buffers.insert(
+                chunk_position,
+                ChunkRenderBuffer::new(device, chunk_position, &vertices, &indices),
+            );
+        }
+    }
+    buffers
+}
+
+fn unique_loaded_chunk_positions(
+    chunk_positions: &[ChunkPosition],
+    world: &ClientWorld,
+) -> Vec<ChunkPosition> {
+    let mut seen = HashSet::new();
+    let mut unique = Vec::new();
+    for chunk_position in chunk_positions {
+        if world.chunks.contains_key(chunk_position) && seen.insert(*chunk_position) {
+            unique.push(*chunk_position);
+        }
+    }
+    unique
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -1013,9 +1093,9 @@ impl ClientWorld {
         self.chunks.insert(chunk.position(), chunk);
     }
 
-    fn ensure_chunks_around_render_position(&mut self, position: Vec3) -> bool {
+    fn ensure_chunks_around_render_position(&mut self, position: Vec3) -> Vec<ChunkPosition> {
         let center = chunk_position_for_render_position(position);
-        let mut generated_any = false;
+        let mut dirty_chunks = HashSet::new();
 
         for z in center.z - self.render_distance_chunks..=center.z + self.render_distance_chunks {
             for x in center.x - self.render_distance_chunks..=center.x + self.render_distance_chunks
@@ -1029,11 +1109,11 @@ impl ClientWorld {
                     .generation_pipeline
                     .generate_chunk(chunk_position, &self.generation_context);
                 self.insert_chunk(chunk);
-                generated_any = true;
+                self.mark_chunk_and_horizontal_neighbors_dirty(chunk_position, &mut dirty_chunks);
             }
         }
 
-        generated_any
+        dirty_chunks.into_iter().collect()
     }
 
     fn safe_spawn_eye_position(&self, preferred_position: Vec3) -> Vec3 {
@@ -1066,12 +1146,19 @@ impl ClientWorld {
             .unwrap_or(fallback)
     }
 
-    fn build_render_mesh(&self, texture_atlas: &TextureAtlas) -> (Vec<Vertex>, Vec<u32>) {
-        let mut chunk_meshes = Vec::with_capacity(self.chunks.len());
-        for (position, chunk) in &self.chunks {
-            chunk_meshes.push((*position, self.mesh_chunk_for_render(*position, chunk)));
-        }
-        build_render_mesh(&chunk_meshes, &self.blocks, texture_atlas)
+    fn build_chunk_render_mesh(
+        &self,
+        chunk_position: ChunkPosition,
+        texture_atlas: &TextureAtlas,
+    ) -> Option<(Vec<Vertex>, Vec<u32>)> {
+        let chunk = self.chunks.get(&chunk_position)?;
+        let mesh = self.mesh_chunk_for_render(chunk_position, chunk);
+        Some(build_render_mesh(
+            &[(chunk_position, mesh)],
+            &self.blocks,
+            texture_atlas,
+            RenderChunkBounds::from_chunk_positions(self.chunks.keys().copied()),
+        ))
     }
 
     fn mesh_chunk_for_render(&self, chunk_position: ChunkPosition, chunk: &Chunk) -> ChunkMesh {
@@ -1184,13 +1271,13 @@ impl ClientWorld {
         None
     }
 
-    fn break_block(&mut self, position: WorldBlockPosition) -> bool {
+    fn break_block(&mut self, position: WorldBlockPosition) -> Vec<ChunkPosition> {
         self.set_block(position, self.block_ids.air)
     }
 
-    fn place_block(&mut self, position: WorldBlockPosition, block: BlockId) -> bool {
+    fn place_block(&mut self, position: WorldBlockPosition, block: BlockId) -> Vec<ChunkPosition> {
         if self.is_solid(position) {
-            return false;
+            return Vec::new();
         }
         self.set_block(position, block)
     }
@@ -1209,14 +1296,38 @@ impl ClientWorld {
             .and_then(|chunk| chunk.block(block_position))
     }
 
-    fn set_block(&mut self, position: WorldBlockPosition, block: BlockId) -> bool {
+    fn set_block(&mut self, position: WorldBlockPosition, block: BlockId) -> Vec<ChunkPosition> {
         let Some((chunk_position, block_position)) = split_world_block_position(position) else {
-            return false;
+            return Vec::new();
         };
         let Some(chunk) = self.chunks.get_mut(&chunk_position) else {
-            return false;
+            return Vec::new();
         };
-        chunk.set_block(block_position, block).is_ok()
+        let Ok(()) = chunk.set_block(block_position, block) else {
+            return Vec::new();
+        };
+
+        let mut dirty_chunks = HashSet::new();
+        dirty_chunks.insert(chunk_position);
+        for neighbor in dirty_horizontal_chunk_positions_for_block(chunk_position, block_position) {
+            if self.chunks.contains_key(&neighbor) {
+                dirty_chunks.insert(neighbor);
+            }
+        }
+        dirty_chunks.into_iter().collect()
+    }
+
+    fn mark_chunk_and_horizontal_neighbors_dirty(
+        &self,
+        chunk_position: ChunkPosition,
+        dirty_chunks: &mut HashSet<ChunkPosition>,
+    ) {
+        dirty_chunks.insert(chunk_position);
+        for neighbor in horizontal_neighbor_chunk_positions(chunk_position) {
+            if self.chunks.contains_key(&neighbor) {
+                dirty_chunks.insert(neighbor);
+            }
+        }
     }
 }
 
@@ -1314,6 +1425,59 @@ fn split_world_block_position(
     };
 
     Some((chunk_position, block_position))
+}
+
+fn horizontal_neighbor_chunk_positions(chunk_position: ChunkPosition) -> [ChunkPosition; 4] {
+    [
+        ChunkPosition {
+            x: chunk_position.x - 1,
+            z: chunk_position.z,
+        },
+        ChunkPosition {
+            x: chunk_position.x + 1,
+            z: chunk_position.z,
+        },
+        ChunkPosition {
+            x: chunk_position.x,
+            z: chunk_position.z - 1,
+        },
+        ChunkPosition {
+            x: chunk_position.x,
+            z: chunk_position.z + 1,
+        },
+    ]
+}
+
+fn dirty_horizontal_chunk_positions_for_block(
+    chunk_position: ChunkPosition,
+    block_position: BlockPosition,
+) -> Vec<ChunkPosition> {
+    let mut dirty = Vec::with_capacity(4);
+    if block_position.x == 0 {
+        dirty.push(ChunkPosition {
+            x: chunk_position.x - 1,
+            z: chunk_position.z,
+        });
+    }
+    if block_position.x + 1 == CHUNK_SIZE {
+        dirty.push(ChunkPosition {
+            x: chunk_position.x + 1,
+            z: chunk_position.z,
+        });
+    }
+    if block_position.z == 0 {
+        dirty.push(ChunkPosition {
+            x: chunk_position.x,
+            z: chunk_position.z - 1,
+        });
+    }
+    if block_position.z + 1 == CHUNK_SIZE {
+        dirty.push(ChunkPosition {
+            x: chunk_position.x,
+            z: chunk_position.z + 1,
+        });
+    }
+    dirty
 }
 
 #[repr(C)]
@@ -1547,8 +1711,8 @@ fn build_render_mesh(
     chunk_meshes: &[(ChunkPosition, ChunkMesh)],
     blocks: &BlockRegistry,
     texture_atlas: &TextureAtlas,
+    render_bounds: Option<RenderChunkBounds>,
 ) -> (Vec<Vertex>, Vec<u32>) {
-    let render_bounds = RenderChunkBounds::from_chunk_meshes(chunk_meshes);
     let quad_count = chunk_meshes
         .iter()
         .map(|(_, mesh)| mesh.quads.len())
@@ -1594,8 +1758,8 @@ struct RenderChunkBounds {
 }
 
 impl RenderChunkBounds {
-    fn from_chunk_meshes(chunk_meshes: &[(ChunkPosition, ChunkMesh)]) -> Option<Self> {
-        let mut positions = chunk_meshes.iter().map(|(position, _)| *position);
+    fn from_chunk_positions(positions: impl IntoIterator<Item = ChunkPosition>) -> Option<Self> {
+        let mut positions = positions.into_iter();
         let first = positions.next()?;
         let mut bounds = Self {
             min_x: first.x,
@@ -1623,7 +1787,7 @@ fn should_render_preview_quad(
     use crate::engine::mesh::chunk_mesher::FaceDirection;
 
     match quad.direction {
-        FaceDirection::Up => true,
+        FaceDirection::Up | FaceDirection::Down => true,
         FaceDirection::North | FaceDirection::South | FaceDirection::East | FaceDirection::West => {
             if is_outer_render_boundary(quad, chunk_position, render_bounds) {
                 return false;
@@ -1634,7 +1798,6 @@ fn should_render_preview_quad(
                 .fold(f32::MIN, f32::max)
                 >= 60.0
         }
-        FaceDirection::Down => false,
     }
 }
 
@@ -2044,6 +2207,10 @@ mod tests {
             direction: FaceDirection::Up,
             ..wall.clone()
         };
+        let bottom = MeshQuad {
+            direction: FaceDirection::Down,
+            ..wall.clone()
+        };
 
         assert!(!should_render_preview_quad(
             &wall,
@@ -2057,6 +2224,11 @@ mod tests {
         ));
         assert!(should_render_preview_quad(
             &top,
+            ChunkPosition { x: 0, z: 0 },
+            None
+        ));
+        assert!(should_render_preview_quad(
+            &bottom,
             ChunkPosition { x: 0, z: 0 },
             None
         ));
@@ -2140,12 +2312,19 @@ mod tests {
         let content = bootstrap_content().unwrap();
         let mut world = test_client_world(&content);
 
-        assert!(world.ensure_chunks_around_render_position(Vec3::new(0.0, 0.0, 0.0)));
+        let initial_dirty = world.ensure_chunks_around_render_position(Vec3::new(0.0, 0.0, 0.0));
         assert_eq!(world.chunks.len(), 25);
-        assert!(!world.ensure_chunks_around_render_position(Vec3::new(0.0, 0.0, 0.0)));
+        assert_eq!(initial_dirty.len(), 25);
+        assert!(initial_dirty.contains(&ChunkPosition { x: 0, z: 0 }));
+        assert!(
+            world
+                .ensure_chunks_around_render_position(Vec3::new(0.0, 0.0, 0.0))
+                .is_empty()
+        );
         assert_eq!(world.chunks.len(), 25);
 
-        assert!(world.ensure_chunks_around_render_position(Vec3::new(80.0, 0.0, -72.0)));
+        let distant_dirty = world.ensure_chunks_around_render_position(Vec3::new(80.0, 0.0, -72.0));
+        assert!(!distant_dirty.is_empty());
         assert!(world.chunks.contains_key(&ChunkPosition { x: 5, z: -4 }));
         assert!(world.chunks.len() > 25);
     }
@@ -2186,10 +2365,51 @@ mod tests {
         let position = WorldBlockPosition { x: 1, y: 1, z: 1 };
 
         assert!(world.is_solid(position));
-        assert!(world.break_block(position));
+        assert_eq!(
+            world.break_block(position),
+            vec![ChunkPosition { x: 0, z: 0 }]
+        );
         assert!(!world.is_solid(position));
-        assert!(world.place_block(position, content.block_ids.dirt));
+        assert_eq!(
+            world.place_block(position, content.block_ids.dirt),
+            vec![ChunkPosition { x: 0, z: 0 }]
+        );
         assert!(world.is_solid(position));
+    }
+
+    #[test]
+    fn block_edits_mark_only_affected_chunks_dirty() {
+        let content = bootstrap_content().unwrap();
+        let mut world = test_client_world(&content);
+        let mut center_chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, content.block_ids.air);
+        center_chunk
+            .set_block(BlockPosition { x: 8, y: 1, z: 8 }, content.block_ids.stone)
+            .unwrap();
+        center_chunk
+            .set_block(
+                BlockPosition {
+                    x: CHUNK_SIZE - 1,
+                    y: 1,
+                    z: 1,
+                },
+                content.block_ids.stone,
+            )
+            .unwrap();
+        world.insert_chunk(center_chunk);
+        world.insert_chunk(Chunk::filled(
+            ChunkPosition { x: 1, z: 0 },
+            content.block_ids.air,
+        ));
+
+        assert_eq!(
+            world.break_block(WorldBlockPosition { x: 8, y: 1, z: 8 }),
+            vec![ChunkPosition { x: 0, z: 0 }]
+        );
+
+        let dirty = world.break_block(WorldBlockPosition { x: 15, y: 1, z: 1 });
+        assert_eq!(dirty.len(), 2);
+        assert!(dirty.contains(&ChunkPosition { x: 0, z: 0 }));
+        assert!(dirty.contains(&ChunkPosition { x: 1, z: 0 }));
     }
 
     #[test]
@@ -2261,7 +2481,11 @@ mod tests {
         world.insert_chunk(west_chunk);
         world.insert_chunk(east_chunk);
 
-        assert!(world.break_block(WorldBlockPosition { x: 16, y: 1, z: 1 }));
+        assert!(
+            !world
+                .break_block(WorldBlockPosition { x: 16, y: 1, z: 1 })
+                .is_empty()
+        );
         let west_mesh = world.mesh_chunk_for_render(
             ChunkPosition { x: 0, z: 0 },
             world.chunks.get(&ChunkPosition { x: 0, z: 0 }).unwrap(),

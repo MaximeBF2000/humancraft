@@ -34,11 +34,18 @@ status file for verification notes, next steps, and implementation details.
 - Added simple infinite-world streaming to the windowed client: chunks are
   generated deterministically around the player as they move, and the temporary
   outer-boundary render filter now follows the loaded chunk bounds.
+- Replaced the single merged terrain buffer with per-chunk render buffers so
+  block edits and streamed chunk loads no longer remesh and reupload every
+  loaded chunk.
+- Added dirty-chunk remeshing for block edits and chunk streaming, including
+  neighbor refreshes only where boundary culling can change.
+- Fixed exposed bottom faces after block removal by preserving renderer-visible
+  `Down` quads instead of filtering every bottom face after meshing.
 - Updated `PROGRESS.md` throughout the work with implementation notes,
   verification results, and next steps.
 - Added and ran tests covering texture metadata mapping, real stone PNG
-  loading, safe spawn placement, chunk streaming, and deterministic distant
-  chunk generation.
+  loading, safe spawn placement, chunk streaming, deterministic distant chunk
+  generation, underside face rendering, and dirty chunk selection.
 
 ### Project Setup
 
@@ -96,6 +103,9 @@ status file for verification notes, next steps, and implementation details.
 - Added a simple client-side chunk streaming loop that keeps a square chunk
   window loaded around the player and generates missing chunks through the
   reusable world generation pipeline.
+- Changed the windowed renderer to own GPU buffers per chunk instead of as one
+  world-sized mesh, allowing small world updates to rebuild only affected chunk
+  meshes.
 
 ### Player And Interaction
 
@@ -111,6 +121,8 @@ status file for verification notes, next steps, and implementation details.
 - Added selected-block outline rendering for the current raycast target.
 - Added left-click block breaking and right-click dirt placement.
 - Rebuilt the chunk render mesh after block edits.
+- Scoped block-edit render rebuilds to the edited chunk plus loaded horizontal
+  neighbors when the edit touches a chunk boundary.
 - Replaced initial spawn placement with a safe spawn search that validates the
   full player AABB.
 

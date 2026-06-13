@@ -124,6 +124,18 @@ Last updated: 2026-06-13
     bounds instead of a hard-coded startup patch.
 - Added tests for render-to-chunk coordinate mapping, chunk streaming, and
   deterministic distant chunk generation.
+- Replaced the single global terrain GPU buffer with per-chunk render buffers
+  in the windowed client.
+- Added dirty-chunk remeshing for world updates:
+  - interior block edits remesh only their owning chunk
+  - chunk-border block edits also remesh the loaded neighboring chunk whose
+    culled faces may change
+  - newly streamed chunks upload only themselves and already-loaded horizontal
+    neighbors affected by boundary culling
+- Fixed exposed bottom faces by allowing renderer-visible `Down` quads through
+  the temporary preview/render filter instead of discarding all bottom faces
+  after meshing.
+- Added regression tests for underside face filtering and dirty chunk selection.
 
 ## Verified
 
@@ -156,19 +168,24 @@ Last updated: 2026-06-13
 - `cargo test` after adding chunk-boundary visible-face culling.
 - `cargo fmt` after adding simple infinite-world chunk streaming.
 - `cargo test` after adding simple infinite-world chunk streaming.
+- `cargo fmt` after switching to per-chunk render buffers and dirty remeshing.
+- `cargo check` after switching to per-chunk render buffers and dirty remeshing.
+- `cargo test` after switching to per-chunk render buffers and dirty remeshing.
 
 ## Next Concrete Steps
 
 1. Add texture assets and metadata for coal, iron, gold, and diamond ore.
 2. Add hotbar/inventory-backed placement instead of infinite dirt.
 3. Add more complete swept collision and step-up behavior.
-4. Replace face-per-block meshing with greedy meshing or atlas-aware batching
+4. Add lightweight in-game render diagnostics for mesh rebuild counts, dirty
+   chunks, frame time, and loaded chunk count.
+5. Replace face-per-block meshing with greedy meshing or atlas-aware batching
    once render distance grows.
-5. Add biome definitions and a biome stage before expanding terrain content.
-6. Replace temporary value noise with the planned `noise` crate.
-7. Add an unload/save policy for generated chunks before render distance grows
+6. Add biome definitions and a biome stage before expanding terrain content.
+7. Replace temporary value noise with the planned `noise` crate.
+8. Add an unload/save policy for generated chunks before render distance grows
    much further.
-8. Add a small in-game debug overlay showing selected block key, player chunk,
+9. Add a small in-game debug overlay showing selected block key, player chunk,
    loaded chunk count, and selected block position.
 
 ## Notes
