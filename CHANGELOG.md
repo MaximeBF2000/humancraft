@@ -41,6 +41,15 @@ status file for verification notes, next steps, and implementation details.
   neighbor refreshes only where boundary culling can change.
 - Fixed exposed bottom faces after block removal by preserving renderer-visible
   `Down` quads instead of filtering every bottom face after meshing.
+- Added a reusable biome generation layer with deterministic biome lookup and
+  biome-driven terrain profiles.
+- Added initial HumanCraft overworld biomes: plains, forest, and mountains.
+- Added a generic tree decoration stage driven by tree definitions.
+- Added oak log and oak leaves blocks/items, plus generated PNG textures for
+  both block types.
+- Smoothed terrain generation by interpolating value noise, sizing biomes as
+  large chunk-based regions, and blending terrain height inside biome
+  transition bands.
 - Updated `PROGRESS.md` throughout the work with implementation notes,
   verification results, and next steps.
 - Added and ran tests covering texture metadata mapping, real stone PNG
@@ -64,7 +73,8 @@ status file for verification notes, next steps, and implementation details.
 - Added deterministic terrain generation.
 - Added generic ore generation driven by ore definitions.
 - Added initial content registration for air, grass, dirt, stone, coal ore,
-  iron ore, gold ore, diamond ore, and starter item definitions.
+  iron ore, gold ore, diamond ore, oak log, oak leaves, and starter item
+  definitions.
 
 ### World Rendering
 
@@ -106,6 +116,20 @@ status file for verification notes, next steps, and implementation details.
 - Changed the windowed renderer to own GPU buffers per chunk instead of as one
   world-sized mesh, allowing small world updates to rebuild only affected chunk
   meshes.
+- Added texture atlas coverage for oak log and oak leaves.
+
+### World Generation
+
+- Added biome definitions and a deterministic biome source.
+- Changed terrain generation to read biome terrain profiles instead of one
+  global terrain profile.
+- Added plains, forest, and mountains biome content.
+- Added chunk-sized biome region controls with configurable transition bands.
+- Changed terrain noise from raw cell sampling to interpolated sampling.
+- Changed biome-border terrain to blend neighboring biome height profiles.
+- Added a tree decoration stage that places configurable trees by biome,
+  allowed ground block, replaceable block set, shape, and density.
+- Added oak tree generation in forest biomes, with sparse oak trees in plains.
 
 ### Player And Interaction
 
@@ -154,7 +178,8 @@ status file for verification notes, next steps, and implementation details.
   content bootstrap, meshing, preview export, terminal playtest, AZERTY input,
   render filtering, coordinate splitting, mutable client-world block edits,
   raycasting, player AABB collision, selected-block outline geometry, texture
-  metadata mapping, texture loading, and safe spawn placement.
+  metadata mapping, texture loading, safe spawn placement, biome lookup, biome
+  registration, biome-region sizing, terrain continuity, and tree generation.
 - Verified the project repeatedly with:
   - `cargo fmt`
   - `cargo check`

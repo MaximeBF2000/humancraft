@@ -87,6 +87,7 @@ fn hash_key(key: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::world::generation::biome::{BiomeDefinition, BiomeSource};
     use crate::engine::world::{ChunkPosition, generation::terrain::TerrainStage};
 
     #[test]
@@ -98,7 +99,12 @@ mod tests {
         let coal = BlockId::from(4);
         let context = GenerationContext { seed: 99, air };
         let mut chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, air);
-        let terrain = TerrainStage::new(grass, dirt, stone);
+        let terrain = TerrainStage::new(BiomeSource::new(vec![BiomeDefinition::new(
+            "test:plain",
+            grass,
+            dirt,
+            stone,
+        )]));
         terrain.generate(&mut chunk, &context);
         let surface_y = terrain.height_at(context.seed, 0, 0);
         let topsoil_y = surface_y - 1;

@@ -13,8 +13,10 @@
 //! Add new stages for caves, water, trees, decorations, and structures without
 //! changing existing stage implementations.
 
+pub mod biome;
 pub mod ore;
 pub mod terrain;
+pub mod tree;
 
 use crate::engine::world::{BlockId, Chunk, ChunkPosition};
 
@@ -69,6 +71,34 @@ pub fn value_noise_2d(seed: u64, x: i32, z: i32) -> f32 {
     n = n.wrapping_mul(0x94D0_49BB_1331_11EB);
     n ^= n >> 31;
     (n as f64 / u64::MAX as f64) as f32
+}
+
+pub fn interpolated_value_noise_2d(seed: u64, x: i32, z: i32, scale: i32) -> f32 {
+    let scale = scale.max(1);
+    let cell_x = x.div_euclid(scale);
+    let cell_z = z.div_euclid(scale);
+    let local_x = x.rem_euclid(scale) as f32 / scale as f32;
+    let local_z = z.rem_euclid(scale) as f32 / scale as f32;
+    let blend_x = smoothstep(local_x);
+    let blend_z = smoothstep(local_z);
+
+    let north_west = value_noise_2d(seed, cell_x, cell_z);
+    let north_east = value_noise_2d(seed, cell_x + 1, cell_z);
+    let south_west = value_noise_2d(seed, cell_x, cell_z + 1);
+    let south_east = value_noise_2d(seed, cell_x + 1, cell_z + 1);
+
+    let north = lerp(north_west, north_east, blend_x);
+    let south = lerp(south_west, south_east, blend_x);
+    lerp(north, south, blend_z)
+}
+
+pub fn smoothstep(value: f32) -> f32 {
+    let value = value.clamp(0.0, 1.0);
+    value * value * (3.0 - 2.0 * value)
+}
+
+pub fn lerp(start: f32, end: f32, amount: f32) -> f32 {
+    start + (end - start) * amount
 }
 
 pub fn world_x(chunk_position: ChunkPosition, local_x: usize) -> i32 {
@@ -126,5 +156,13 @@ mod tests {
     fn value_noise_is_deterministic() {
         assert_eq!(value_noise_2d(42, -3, 9), value_noise_2d(42, -3, 9));
         assert_ne!(value_noise_2d(42, -3, 9), value_noise_2d(43, -3, 9));
+    }
+
+    #[test]
+    fn interpolated_noise_changes_smoothly_inside_cell() {
+        let first = interpolated_value_noise_2d(42, 10, -20, 64);
+        let second = interpolated_value_noise_2d(42, 11, -20, 64);
+
+        assert!((first - second).abs() < 0.05);
     }
 }

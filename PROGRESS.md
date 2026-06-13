@@ -136,6 +136,33 @@ Last updated: 2026-06-13
   the temporary preview/render filter instead of discarding all bottom faces
   after meshing.
 - Added regression tests for underside face filtering and dirty chunk selection.
+- Added an expandable biome generation layer:
+  - `BiomeDefinition`
+  - `BiomeSource`
+  - biome-driven terrain profiles
+- Added initial overworld biomes:
+  - plains
+  - forest
+  - mountains
+- Added generic tree decoration generation through `TreeDefinition` and
+  `TreeStage`.
+- Added oak tree content using the tree stage:
+  - oak log block and item
+  - oak leaves block and item
+  - oak sapling item drop target
+- Generated oak log and oak leaves PNG textures under `textures/blocks` with
+  the `create-block-texture` skill.
+- Updated world-generation docs for biome and tree stages.
+- Replaced raw cell value-noise terrain sampling with interpolated value noise.
+- Changed biome selection to large macro-regions measured in chunks:
+  - default overworld regions are 10 chunks wide
+  - region borders blend over a 2-chunk transition band
+  - region cores use one primary biome for decorations
+- Changed terrain height to blend biome height profiles inside transition
+  bands, avoiding hard cliffs at chunk and biome boundaries.
+- Added regression coverage for interpolated noise, biome-region sizing,
+  transition width, biome influence normalization, biome region cores, and
+  chunk-border terrain continuity.
 
 ## Verified
 
@@ -171,17 +198,24 @@ Last updated: 2026-06-13
 - `cargo fmt` after switching to per-chunk render buffers and dirty remeshing.
 - `cargo check` after switching to per-chunk render buffers and dirty remeshing.
 - `cargo test` after switching to per-chunk render buffers and dirty remeshing.
+- `cargo fmt` after adding biome terrain and tree generation.
+- Verified oak log and oak leaves texture PNGs are `16 x 16` RGBA images.
+- `cargo test` after adding biome terrain and tree generation.
+- `cargo fmt` after smoothing terrain and biome transitions.
+- `cargo test` after smoothing terrain and biome transitions.
+- `cargo run -- preview` after smoothing terrain and biome transitions.
 
 ## Next Concrete Steps
 
-1. Add texture assets and metadata for coal, iron, gold, and diamond ore.
-2. Add hotbar/inventory-backed placement instead of infinite dirt.
-3. Add more complete swept collision and step-up behavior.
-4. Add lightweight in-game render diagnostics for mesh rebuild counts, dirty
+1. Add a cross-chunk decoration/feature placement pass so trees and future
+   structures can span chunk boundaries.
+2. Add texture assets and metadata for coal, iron, gold, and diamond ore.
+3. Add hotbar/inventory-backed placement instead of infinite dirt.
+4. Add more complete swept collision and step-up behavior.
+5. Add lightweight in-game render diagnostics for mesh rebuild counts, dirty
    chunks, frame time, and loaded chunk count.
-5. Replace face-per-block meshing with greedy meshing or atlas-aware batching
+6. Replace face-per-block meshing with greedy meshing or atlas-aware batching
    once render distance grows.
-6. Add biome definitions and a biome stage before expanding terrain content.
 7. Replace temporary value noise with the planned `noise` crate.
 8. Add an unload/save policy for generated chunks before render distance grows
    much further.
@@ -199,3 +233,9 @@ Last updated: 2026-06-13
   generated and registered.
 - The current atlas is intentionally simple: all block faces are expected to be
   16 x 16 RGBA PNGs.
+- Tree origins are currently kept inside chunk margins so generated trees are
+  complete within one chunk. This should become a cross-chunk feature placement
+  system before larger structures are added.
+- Biome region size and transition width are engine settings supplied by
+  content. Current HumanCraft values favor stable regions over frequent biome
+  changes.
