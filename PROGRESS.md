@@ -247,6 +247,33 @@ Last updated: 2026-06-13
 - Added regression coverage for underground preview filtering, loaded-world
   bottom boundary filtering, chunk-load budgeting, player-occupied placement,
   texture coverage, and high grassy mountain tops.
+- Added a startup main menu and world-management flow before gameplay starts.
+- Added world create, rename, delete, and load controls in the windowed client.
+- Added per-world generation seeds, with numeric seed entry for reproducible
+  terrain and automatic seeds for quick world creation.
+- Added `WorldSaveStore` for versioned world metadata and binary chunk files
+  under `saves/worlds`.
+- Changed windowed chunk streaming to load saved chunk files before falling
+  back to deterministic generation from the world's seed.
+- Saved edited chunks after block changes and saved player position/camera
+  orientation when pausing, losing focus, or closing the window.
+- Added developer documentation for world saves.
+- Added regression coverage for world metadata, saved player coordinates,
+  chunk save/load round-tripping, and saved chunks overriding generation.
+- Replaced the first-pass anonymous menu rectangles with screen-specific UI
+  panels and bitmap text labels for:
+  - main menu
+  - manage worlds
+  - configure new world
+  - rename world
+  - in-game pause overlay
+- Added clickable pause overlay actions:
+  - `Keep Playing`
+  - `Save & Quit`
+- Changed world saving to keep edited chunks dirty in memory during gameplay
+  and flush them on `Save & Quit` or window close, avoiding frame drops from
+  file writes during rendering/update.
+- Buffered chunk-file writes into one byte buffer per chunk during flush.
 
 ## Verified
 
@@ -258,6 +285,8 @@ Last updated: 2026-06-13
 - `cargo check` after adding PNG texture loading.
 - `cargo test` after adding texture metadata, atlas sampling, and the texture
   path test.
+- `cargo test` after adding world saves and menu-driven world loading.
+- `cargo test` after fixing menu rendering and deferring save writes.
 - `cargo test` after the Minecraft-style movement, sprint, and sneaking
   changes.
 - `cargo test player_can_jump_onto_one_block_ledge -- --nocapture`

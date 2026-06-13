@@ -95,6 +95,24 @@ status file for verification notes, next steps, and implementation details.
   values.
 - Added player movement documentation for players, developers, and future
   coding agents.
+- Added a startup main menu that leads into world management before gameplay
+  starts.
+- Added windowed world create, rename, delete, and load controls.
+- Added per-world generation seeds, including numeric seed entry for
+  reproducible terrain and automatic seed generation for quick creation.
+- Added versioned save metadata and binary chunk files under `saves/worlds`.
+- Changed chunk streaming so saved chunks override deterministic generation,
+  preserving block edits across sessions.
+- Saved player coordinates and camera orientation when pausing, losing focus,
+  or closing the game.
+- Added world-save developer documentation and regression coverage for
+  metadata, chunk round-tripping, saved player state, and saved chunk reloads.
+- Replaced anonymous menu rectangles with readable screen-specific UI labels
+  and clickable actions for main menu, world management, new-world config,
+  rename, and pause overlay.
+- Changed gameplay saves to dirty in-memory chunk/player state and flush only
+  on `Save & Quit` or window close, avoiding disk writes during frame updates.
+- Buffered chunk save writes into one contiguous write per chunk during flush.
 - Updated `PROGRESS.md` throughout the work with implementation notes,
   verification results, and next steps.
 - Added and ran tests covering texture metadata mapping, real stone PNG

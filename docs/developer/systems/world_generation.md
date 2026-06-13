@@ -63,6 +63,9 @@ generation.
 - Guarantee the bottom Y layer is bedrock after terrain and ores have run.
 - Generate chunks deterministically from world seed and chunk position so client
   systems can request new terrain as the player moves.
+- Treat generation as the fallback source of chunk data. When a saved chunk
+  exists for a world, the windowed client loads that chunk instead of
+  regenerating it.
 
 ## Inputs
 
@@ -86,7 +89,7 @@ generation.
 - Allow tree and structure generators to write across chunk boundaries through a
   feature-placement or deferred-decoration pass.
 - Move generation settings to serialized data files.
-- Add chunk streaming policy for unloading, persistence, and save/load.
+- Add chunk unloading and background save scheduling.
 
 ## Known Limitations
 
@@ -97,5 +100,5 @@ generation.
 - Tree placement clips origins away from chunk edges to avoid partial trees
   until cross-chunk decoration exists.
 - There are no caves, water, or non-tree decorations yet.
-- The windowed client keeps generated chunks resident; there is no unload or
-  persistence policy yet.
+- The windowed client keeps generated chunks resident; there is no unload
+  policy yet.

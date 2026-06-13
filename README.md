@@ -1,7 +1,8 @@
 # HumanCraft
 
 HumanCraft is an early Rust voxel survival game foundation. The current build
-opens a native window with generated voxel terrain and a controllable camera.
+opens a native window with a main menu, saved worlds, generated voxel terrain,
+and a controllable player camera.
 
 ## Run
 
@@ -13,6 +14,12 @@ cargo run
 
 Controls:
 
+- Main menu: click the center button or press `Enter` to open world management
+- Manage worlds: `Enter` loads the selected world, `N` creates a world, `R`
+  renames the selected world, `Delete` deletes it, and arrow keys change
+  selection
+- New world config: type a name and optional numeric seed; `Tab` switches
+  fields and `Enter` creates the world
 - `Z`: move forward
 - `S`: move backward
 - `Q`: move left
@@ -23,8 +30,10 @@ Controls:
 - Mouse: look around
 - Left click: break the targeted block
 - Right click: place dirt against the targeted block
-- `Esc`: pause/resume and release/capture the mouse cursor
-- Window close button: quit
+- `Esc`: open the pause overlay
+- Pause overlay: `Keep Playing` resumes; `Save & Quit` writes player/chunk
+  changes and returns to the main menu
+- Window close button: save and quit
 
 ## Debug Commands
 
@@ -68,7 +77,10 @@ Implemented:
 - Selected-block outline
 - Basic player collision AABB
 - Directional face shading
+- Main menu and saved world management
+- Per-world generation seeds
+- Saved player position and saved edited chunks
 
 Not implemented yet:
 
-- Saving/loading
+- Inventory, health, hunger, and game mode persistence

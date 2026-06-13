@@ -5,6 +5,21 @@ behavior.
 
 ## Controls
 
+Startup opens the main menu. Click the center button or press `Enter` to open
+world management.
+
+World management controls:
+
+- `Enter`: load the selected world, or start creating one if no worlds exist
+- `N`: create a new world
+- `R`: rename the selected world
+- `Delete`: delete the selected world
+- Arrow keys: change selected world
+- New world config: edit world name and seed on the same screen. `Tab` switches
+  fields, `Enter` creates the world, and a blank seed uses an automatic seed.
+
+In-game controls:
+
 - `Z`: move forward
 - `S`: move backward
 - `Q`: move left
@@ -15,7 +30,8 @@ behavior.
 - Mouse: look around
 - Left click: break the targeted block
 - Right click: place dirt against the targeted block
-- `Esc`: pause or resume, releasing or capturing the mouse cursor
+- `Esc`: open the pause overlay. `Keep Playing` resumes. `Save & Quit` flushes
+  player state and edited chunks to disk, then returns to the main menu.
 
 ## Movement
 

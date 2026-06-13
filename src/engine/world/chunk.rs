@@ -29,6 +29,7 @@ pub struct BlockPosition {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChunkError {
     OutOfBounds(BlockPosition),
+    InvalidBlockCount { expected: usize, actual: usize },
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +44,17 @@ impl Chunk {
             position,
             blocks: vec![block; CHUNK_VOLUME],
         }
+    }
+
+    pub fn from_blocks(position: ChunkPosition, blocks: Vec<BlockId>) -> Result<Self, ChunkError> {
+        if blocks.len() != CHUNK_VOLUME {
+            return Err(ChunkError::InvalidBlockCount {
+                expected: CHUNK_VOLUME,
+                actual: blocks.len(),
+            });
+        }
+
+        Ok(Self { position, blocks })
     }
 
     pub fn position(&self) -> ChunkPosition {

@@ -9,8 +9,8 @@ use glam::{Mat4, Vec3};
 use image::GenericImageView;
 use wgpu::util::DeviceExt;
 use winit::application::ApplicationHandler;
-use winit::dpi::PhysicalSize;
-use winit::event::{DeviceEvent, ElementState, KeyEvent, MouseButton, WindowEvent};
+use winit::dpi::{PhysicalPosition, PhysicalSize};
+use winit::event::{DeviceEvent, ElementState, Ime, KeyEvent, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowAttributes, WindowId};
@@ -18,6 +18,9 @@ use winit::window::{CursorGrabMode, Window, WindowAttributes, WindowId};
 use crate::content::{BlockIds, bootstrap_content, default_generation_pipeline};
 use crate::engine::mesh::chunk_mesher::{ChunkMesh, ChunkMesher};
 use crate::engine::world::generation::{GenerationContext, GenerationPipeline};
+use crate::engine::world::save::{
+    PlayerSave, WorldMetadata, WorldSaveError, WorldSaveStore, default_world_name, new_world_seed,
+};
 use crate::engine::world::{
     BlockId, BlockPosition, BlockRegistry, CHUNK_HEIGHT, CHUNK_SIZE, Chunk, ChunkPosition,
 };
@@ -193,19 +196,24 @@ impl ApplicationHandler for WindowedApp {
         }
 
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                state.flush_active_world_to_disk();
+                event_loop.exit();
+            }
             WindowEvent::Resized(size) => state.resize(size),
             WindowEvent::KeyboardInput { event, .. } => {
                 if state.handle_key(&event) {
                     return;
                 }
             }
+            WindowEvent::Ime(Ime::Commit(text)) => state.handle_text_input(&text),
+            WindowEvent::CursorMoved { position, .. } => state.handle_cursor_moved(position),
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
                 button,
                 ..
             } => state.handle_mouse_button(button),
-            WindowEvent::Focused(false) => state.set_paused(true),
+            WindowEvent::Focused(false) => state.handle_focus_lost(),
             WindowEvent::RedrawRequested => {
                 state.update();
                 match state.render() {
@@ -260,9 +268,6 @@ struct RenderState {
     camera_bind_group: wgpu::BindGroup,
     chunk_buffers: HashMap<ChunkPosition, ChunkRenderBuffer>,
     pending_chunk_remeshes: HashSet<ChunkPosition>,
-    menu_vertex_buffer: wgpu::Buffer,
-    menu_index_buffer: wgpu::Buffer,
-    menu_index_count: u32,
     crosshair_vertex_buffer: wgpu::Buffer,
     crosshair_index_buffer: wgpu::Buffer,
     crosshair_index_count: u32,
@@ -270,11 +275,151 @@ struct RenderState {
     outline_vertex_count: u32,
     depth_texture: Texture,
     camera: Camera,
-    world: ClientWorld,
+    world: Option<ClientWorld>,
+    save_store: WorldSaveStore,
+    worlds: Vec<WorldMetadata>,
+    active_world: Option<WorldMetadata>,
+    mode: AppMode,
+    selected_world: usize,
+    text_entry: TextEntry,
+    new_world_config: NewWorldConfig,
+    dirty_save_chunks: HashSet<ChunkPosition>,
+    player_state_dirty: bool,
+    cursor_position: PhysicalPosition<f64>,
     targeted_block: Option<WorldBlockPosition>,
     input: InputState,
     paused: bool,
     last_frame: Instant,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum AppMode {
+    MainMenu,
+    ManageWorlds,
+    ConfigNewWorld,
+    RenamingWorld,
+    InGame,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum ConfigField {
+    Name,
+    Seed,
+}
+
+#[derive(Debug, Clone)]
+struct NewWorldConfig {
+    name: String,
+    seed: String,
+    focused: ConfigField,
+}
+
+impl Default for NewWorldConfig {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            seed: String::new(),
+            focused: ConfigField::Name,
+        }
+    }
+}
+
+impl NewWorldConfig {
+    fn start(&mut self, fallback_name: String) {
+        self.name = fallback_name;
+        self.seed.clear();
+        self.focused = ConfigField::Name;
+    }
+
+    fn push(&mut self, text: &str) {
+        let target = match self.focused {
+            ConfigField::Name => &mut self.name,
+            ConfigField::Seed => &mut self.seed,
+        };
+        for character in text.chars() {
+            if !character.is_control() && target.chars().count() < 64 {
+                target.push(character);
+            }
+        }
+    }
+
+    fn pop(&mut self) {
+        match self.focused {
+            ConfigField::Name => {
+                self.name.pop();
+            }
+            ConfigField::Seed => {
+                self.seed.pop();
+            }
+        }
+    }
+
+    fn toggle_focus(&mut self) {
+        self.focused = match self.focused {
+            ConfigField::Name => ConfigField::Seed,
+            ConfigField::Seed => ConfigField::Name,
+        };
+    }
+
+    fn final_name(&self) -> String {
+        let trimmed = self.name.trim();
+        if trimmed.is_empty() {
+            "New World".to_string()
+        } else {
+            trimmed.to_string()
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct TextEntry {
+    value: String,
+    fallback: String,
+}
+
+impl Default for TextEntry {
+    fn default() -> Self {
+        Self {
+            value: String::new(),
+            fallback: String::new(),
+        }
+    }
+}
+
+impl TextEntry {
+    fn start(&mut self, fallback: impl Into<String>) {
+        self.value.clear();
+        self.fallback = fallback.into();
+    }
+
+    fn push(&mut self, text: &str) {
+        for character in text.chars() {
+            if !character.is_control() && self.value.chars().count() < 64 {
+                self.value.push(character);
+            }
+        }
+    }
+
+    fn pop(&mut self) {
+        self.value.pop();
+    }
+
+    fn finish(&self) -> String {
+        let trimmed = self.value.trim();
+        if trimmed.is_empty() {
+            self.fallback.clone()
+        } else {
+            trimmed.to_string()
+        }
+    }
+
+    fn display(&self) -> &str {
+        if self.value.is_empty() {
+            &self.fallback
+        } else {
+            &self.value
+        }
+    }
 }
 
 impl RenderState {
@@ -330,24 +475,9 @@ impl RenderState {
         surface.configure(&device, &config);
 
         let content = bootstrap_content().expect("content should bootstrap");
-        let pipeline = default_generation_pipeline(content.block_ids);
-        let generation_context = GenerationContext {
-            seed: 1,
-            air: content.block_ids.air,
-        };
-        let mut world = ClientWorld::new(
-            content.blocks.clone(),
-            content.block_ids,
-            pipeline,
-            generation_context,
-            CLIENT_RENDER_DISTANCE_CHUNKS,
-        );
-        let preferred_spawn = Vec3::new(0.0, 0.0, 20.0);
-        let generated_chunks =
-            world.ensure_chunks_around_render_position(preferred_spawn, usize::MAX);
         let texture_atlas = TextureAtlas::load(&device, &queue, &content.blocks);
 
-        let camera = Camera::new(world.safe_spawn_eye_position(preferred_spawn));
+        let camera = Camera::new(Vec3::new(0.0, PLAYER_STANDING_EYE_HEIGHT + 12.0, 0.0));
         let camera_uniform =
             CameraUniform::new(camera.view_projection(config.width, config.height));
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -551,19 +681,7 @@ impl RenderState {
             multiview: None,
             cache: None,
         });
-        let chunk_buffers =
-            build_chunk_render_buffers(&device, &world, &texture_atlas, &generated_chunks);
-        let (menu_vertices, menu_indices) = build_menu_mesh();
-        let menu_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Menu Vertex Buffer"),
-            contents: bytemuck::cast_slice(&menu_vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let menu_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Menu Index Buffer"),
-            contents: bytemuck::cast_slice(&menu_indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let chunk_buffers = HashMap::new();
         let (crosshair_vertices, crosshair_indices) =
             build_crosshair_mesh(config.width, config.height);
         let crosshair_vertex_buffer =
@@ -584,7 +702,13 @@ impl RenderState {
             mapped_at_creation: false,
         });
 
-        capture_cursor(&window);
+        release_cursor(&window);
+
+        let save_store = WorldSaveStore::default();
+        let worlds = save_store.list_worlds().unwrap_or_else(|error| {
+            eprintln!("{error}");
+            Vec::new()
+        });
 
         Self {
             window,
@@ -602,9 +726,6 @@ impl RenderState {
             camera_bind_group,
             chunk_buffers,
             pending_chunk_remeshes: HashSet::new(),
-            menu_vertex_buffer,
-            menu_index_buffer,
-            menu_index_count: menu_indices.len() as u32,
             crosshair_vertex_buffer,
             crosshair_index_buffer,
             crosshair_index_count: crosshair_indices.len() as u32,
@@ -612,12 +733,23 @@ impl RenderState {
             outline_vertex_count: 0,
             depth_texture,
             camera,
-            world,
+            world: None,
+            save_store,
+            worlds,
+            active_world: None,
+            mode: AppMode::MainMenu,
+            selected_world: 0,
+            text_entry: TextEntry::default(),
+            new_world_config: NewWorldConfig::default(),
+            dirty_save_chunks: HashSet::new(),
+            player_state_dirty: false,
+            cursor_position: PhysicalPosition::new(0.0, 0.0),
             targeted_block: None,
             input: InputState::default(),
-            paused: false,
+            paused: true,
             last_frame: Instant::now(),
         }
+        .with_updated_title()
     }
 
     fn resize(&mut self, size: PhysicalSize<u32>) {
@@ -634,62 +766,218 @@ impl RenderState {
     }
 
     fn handle_key(&mut self, event: &KeyEvent) -> bool {
+        if event.state == ElementState::Pressed {
+            if self.handle_menu_key(event) {
+                return true;
+            }
+        }
+
         if event.state == ElementState::Pressed
             && matches!(event.logical_key.as_ref(), Key::Named(NamedKey::Escape))
+            && self.mode == AppMode::InGame
         {
             self.set_paused(!self.paused);
             return true;
         }
 
-        if !self.paused {
+        if self.mode == AppMode::InGame && !self.paused {
             self.input.handle_key(event);
         }
         true
     }
 
+    fn handle_menu_key(&mut self, event: &KeyEvent) -> bool {
+        match self.mode {
+            AppMode::MainMenu => {
+                if is_confirm_key(event) {
+                    self.mode = AppMode::ManageWorlds;
+                    self.refresh_worlds();
+                    self.update_window_title();
+                    return true;
+                }
+            }
+            AppMode::ManageWorlds => {
+                if is_confirm_key(event) {
+                    self.load_selected_world();
+                    return true;
+                }
+                if matches!(event.logical_key.as_ref(), Key::Named(NamedKey::ArrowUp)) {
+                    self.select_previous_world();
+                    return true;
+                }
+                if matches!(event.logical_key.as_ref(), Key::Named(NamedKey::ArrowDown)) {
+                    self.select_next_world();
+                    return true;
+                }
+                if matches!(event.logical_key.as_ref(), Key::Named(NamedKey::Delete)) {
+                    self.delete_selected_world();
+                    return true;
+                }
+                if character_key(event, "n") {
+                    self.start_world_creation();
+                    return true;
+                }
+                if character_key(event, "r") {
+                    self.start_world_rename();
+                    return true;
+                }
+                if matches!(event.logical_key.as_ref(), Key::Named(NamedKey::Escape)) {
+                    self.mode = AppMode::MainMenu;
+                    self.update_window_title();
+                    return true;
+                }
+            }
+            AppMode::ConfigNewWorld => {
+                if is_confirm_key(event) {
+                    self.create_configured_world();
+                    return true;
+                }
+                if matches!(event.logical_key.as_ref(), Key::Named(NamedKey::Tab)) {
+                    self.new_world_config.toggle_focus();
+                    self.update_window_title();
+                    return true;
+                }
+                if matches!(event.logical_key.as_ref(), Key::Named(NamedKey::Backspace)) {
+                    self.new_world_config.pop();
+                    self.update_window_title();
+                    return true;
+                }
+                if matches!(event.logical_key.as_ref(), Key::Named(NamedKey::Escape)) {
+                    self.mode = AppMode::ManageWorlds;
+                    self.update_window_title();
+                    return true;
+                }
+                if let Key::Character(character) = event.logical_key.as_ref() {
+                    self.new_world_config.push(character);
+                    self.update_window_title();
+                    return true;
+                }
+            }
+            AppMode::RenamingWorld => {
+                if is_confirm_key(event) {
+                    self.finish_text_entry();
+                    return true;
+                }
+                if matches!(event.logical_key.as_ref(), Key::Named(NamedKey::Backspace)) {
+                    self.text_entry.pop();
+                    self.update_window_title();
+                    return true;
+                }
+                if matches!(event.logical_key.as_ref(), Key::Named(NamedKey::Escape)) {
+                    self.mode = AppMode::ManageWorlds;
+                    self.text_entry = TextEntry::default();
+                    self.update_window_title();
+                    return true;
+                }
+                if let Key::Character(character) = event.logical_key.as_ref() {
+                    self.text_entry.push(character);
+                    self.update_window_title();
+                    return true;
+                }
+            }
+            AppMode::InGame => {
+                if self.paused {
+                    if is_confirm_key(event) {
+                        self.resume_game();
+                        return true;
+                    }
+                    if matches!(event.logical_key.as_ref(), Key::Named(NamedKey::Escape)) {
+                        self.resume_game();
+                        return true;
+                    }
+                    if character_key(event, "q") {
+                        self.save_and_quit_to_main_menu();
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
+    fn handle_text_input(&mut self, text: &str) {
+        if text.is_ascii() {
+            return;
+        }
+        match self.mode {
+            AppMode::ConfigNewWorld => {
+                self.new_world_config.push(text);
+                self.update_window_title();
+            }
+            AppMode::RenamingWorld => {
+                self.text_entry.push(text);
+                self.update_window_title();
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_cursor_moved(&mut self, position: PhysicalPosition<f64>) {
+        self.cursor_position = position;
+    }
+
+    fn handle_focus_lost(&mut self) {
+        if self.mode == AppMode::InGame {
+            self.set_paused(true);
+        }
+    }
+
     fn handle_mouse_motion(&mut self, delta_x: f32, delta_y: f32) {
-        if !self.paused {
+        if self.mode == AppMode::InGame && !self.paused {
             self.camera.apply_mouse_delta(delta_x, delta_y);
         }
     }
 
     fn handle_mouse_button(&mut self, button: MouseButton) {
+        if self.mode != AppMode::InGame || self.paused {
+            if button == MouseButton::Left {
+                self.handle_menu_click();
+            }
+            return;
+        }
+
         if self.paused {
             return;
         }
 
-        let Some(hit) = self
-            .world
-            .raycast(self.camera.position, self.camera.forward())
-        else {
+        let Some(world) = self.world.as_mut() else {
+            return;
+        };
+        let Some(hit) = world.raycast(self.camera.position, self.camera.forward()) else {
             return;
         };
 
         let dirty_chunks = match button {
-            MouseButton::Left => self.world.break_block(hit.block),
-            MouseButton::Right => self.world.place_block_for_player(
+            MouseButton::Left => world.break_block(hit.block),
+            MouseButton::Right => world.place_block_for_player(
                 hit.previous,
-                self.world.block_ids.dirt,
+                world.block_ids.dirt,
                 self.camera.position,
             ),
             _ => Vec::new(),
         };
 
         if !dirty_chunks.is_empty() {
+            self.mark_dirty_chunks_for_save(&dirty_chunks);
             self.rebuild_chunk_meshes(&dirty_chunks);
         }
     }
 
     fn set_paused(&mut self, paused: bool) {
+        if self.mode != AppMode::InGame {
+            return;
+        }
         self.paused = paused;
         self.input.clear_movement();
         if paused {
+            self.mark_player_state_dirty();
             release_cursor(&self.window);
             self.window
                 .set_title("HumanCraft - Paused (Esc to resume, close window to quit)");
         } else {
             capture_cursor(&self.window);
-            self.window.set_title("HumanCraft");
+            self.update_window_title();
         }
     }
 
@@ -698,14 +986,18 @@ impl RenderState {
         let delta_seconds = now.duration_since(self.last_frame).as_secs_f32().min(0.1);
         self.last_frame = now;
         let mut dirty_chunks = Vec::new();
-        if !self.paused {
-            self.camera.update(&self.input, &self.world, delta_seconds);
-            dirty_chunks.extend(self.world.ensure_chunks_around_render_position(
-                self.camera.position,
-                MAX_CHUNK_LOADS_PER_FRAME,
-            ));
+        if self.mode == AppMode::InGame && !self.paused {
+            if let Some(world) = self.world.as_mut() {
+                self.camera.update(&self.input, world, delta_seconds);
+                dirty_chunks.extend(world.ensure_chunks_around_render_position_with_store(
+                    self.camera.position,
+                    MAX_CHUNK_LOADS_PER_FRAME,
+                    &self.save_store,
+                ));
+            }
         }
         if !dirty_chunks.is_empty() {
+            self.mark_dirty_chunks_for_save(&dirty_chunks);
             self.queue_chunk_remeshes(&dirty_chunks);
         }
         let remesh_chunks = self.take_pending_chunk_remeshes(MAX_CHUNK_REMESHES_PER_FRAME);
@@ -722,6 +1014,32 @@ impl RenderState {
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+        let ui_mesh = if self.mode != AppMode::InGame || self.paused {
+            Some(build_menu_mesh(self))
+        } else {
+            None
+        };
+        let ui_buffers = ui_mesh.as_ref().and_then(|(vertices, indices)| {
+            if vertices.is_empty() || indices.is_empty() {
+                return None;
+            }
+            let vertex_buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Dynamic Menu Vertex Buffer"),
+                    contents: bytemuck::cast_slice(vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+            let index_buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Dynamic Menu Index Buffer"),
+                    contents: bytemuck::cast_slice(indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
+            Some((vertex_buffer, index_buffer, indices.len() as u32))
+        });
+
         let frame = self.surface.get_current_texture()?;
         let view = frame
             .texture
@@ -760,40 +1078,44 @@ impl RenderState {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            pass.set_pipeline(&self.render_pipeline);
-            pass.set_bind_group(0, &self.camera_bind_group, &[]);
-            pass.set_bind_group(1, &self.texture_bind_group, &[]);
-            for chunk_buffer in self.chunk_buffers.values() {
-                if chunk_buffer.index_count == 0 {
-                    continue;
-                }
-                pass.set_vertex_buffer(0, chunk_buffer.vertex_buffer.slice(..));
-                pass.set_index_buffer(
-                    chunk_buffer.index_buffer.slice(..),
-                    wgpu::IndexFormat::Uint32,
-                );
-                pass.draw_indexed(0..chunk_buffer.index_count, 0, 0..1);
-            }
-
-            if self.outline_vertex_count > 0 {
-                pass.set_pipeline(&self.line_pipeline);
+            if self.mode == AppMode::InGame {
+                pass.set_pipeline(&self.render_pipeline);
                 pass.set_bind_group(0, &self.camera_bind_group, &[]);
-                pass.set_vertex_buffer(0, self.outline_vertex_buffer.slice(..));
-                pass.draw(0..self.outline_vertex_count, 0..1);
+                pass.set_bind_group(1, &self.texture_bind_group, &[]);
+                for chunk_buffer in self.chunk_buffers.values() {
+                    if chunk_buffer.index_count == 0 {
+                        continue;
+                    }
+                    pass.set_vertex_buffer(0, chunk_buffer.vertex_buffer.slice(..));
+                    pass.set_index_buffer(
+                        chunk_buffer.index_buffer.slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
+                    pass.draw_indexed(0..chunk_buffer.index_count, 0, 0..1);
+                }
+
+                if self.outline_vertex_count > 0 {
+                    pass.set_pipeline(&self.line_pipeline);
+                    pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                    pass.set_vertex_buffer(0, self.outline_vertex_buffer.slice(..));
+                    pass.draw(0..self.outline_vertex_count, 0..1);
+                }
             }
 
             pass.set_pipeline(&self.ui_pipeline);
-            pass.set_vertex_buffer(0, self.crosshair_vertex_buffer.slice(..));
-            pass.set_index_buffer(
-                self.crosshair_index_buffer.slice(..),
-                wgpu::IndexFormat::Uint32,
-            );
-            pass.draw_indexed(0..self.crosshair_index_count, 0, 0..1);
+            if self.mode == AppMode::InGame && !self.paused {
+                pass.set_vertex_buffer(0, self.crosshair_vertex_buffer.slice(..));
+                pass.set_index_buffer(
+                    self.crosshair_index_buffer.slice(..),
+                    wgpu::IndexFormat::Uint32,
+                );
+                pass.draw_indexed(0..self.crosshair_index_count, 0, 0..1);
+            }
 
-            if self.paused {
-                pass.set_vertex_buffer(0, self.menu_vertex_buffer.slice(..));
-                pass.set_index_buffer(self.menu_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..self.menu_index_count, 0, 0..1);
+            if let Some((vertex_buffer, index_buffer, index_count)) = &ui_buffers {
+                pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..*index_count, 0, 0..1);
             }
         }
 
@@ -803,10 +1125,12 @@ impl RenderState {
     }
 
     fn rebuild_chunk_meshes(&mut self, dirty_chunks: &[ChunkPosition]) {
-        for chunk_position in unique_loaded_chunk_positions(dirty_chunks, &self.world) {
-            let Some((vertices, indices)) = self
-                .world
-                .build_chunk_render_mesh(chunk_position, &self.texture_atlas)
+        let Some(world) = &self.world else {
+            return;
+        };
+        for chunk_position in unique_loaded_chunk_positions(dirty_chunks, world) {
+            let Some((vertices, indices)) =
+                world.build_chunk_render_mesh(chunk_position, &self.texture_atlas)
             else {
                 self.chunk_buffers.remove(&chunk_position);
                 continue;
@@ -819,7 +1143,10 @@ impl RenderState {
     }
 
     fn queue_chunk_remeshes(&mut self, dirty_chunks: &[ChunkPosition]) {
-        for chunk_position in unique_loaded_chunk_positions(dirty_chunks, &self.world) {
+        let Some(world) = &self.world else {
+            return;
+        };
+        for chunk_position in unique_loaded_chunk_positions(dirty_chunks, world) {
             self.pending_chunk_remeshes.insert(chunk_position);
         }
     }
@@ -842,11 +1169,12 @@ impl RenderState {
     }
 
     fn update_target_outline(&mut self) {
-        self.targeted_block = if self.paused {
+        self.targeted_block = if self.mode != AppMode::InGame || self.paused {
             None
         } else {
             self.world
-                .raycast(self.camera.position, self.camera.forward())
+                .as_ref()
+                .and_then(|world| world.raycast(self.camera.position, self.camera.forward()))
                 .map(|hit| hit.block)
         };
 
@@ -870,6 +1198,358 @@ impl RenderState {
             0,
             bytemuck::cast_slice(&vertices),
         );
+    }
+
+    fn handle_menu_click(&mut self) {
+        let x = self.cursor_position.x / self.size.width.max(1) as f64 * 2.0 - 1.0;
+        let y = 1.0 - self.cursor_position.y / self.size.height.max(1) as f64 * 2.0;
+        let point = UiPoint {
+            x: x as f32,
+            y: y as f32,
+        };
+
+        match self.mode {
+            AppMode::MainMenu => {
+                if UI_MAIN_PLAY.contains(point) {
+                    self.mode = AppMode::ManageWorlds;
+                    self.refresh_worlds();
+                    self.update_window_title();
+                }
+            }
+            AppMode::ManageWorlds => {
+                if UI_WORLDS_PLAY.contains(point) {
+                    self.load_selected_world();
+                } else if UI_WORLDS_NEW.contains(point) {
+                    self.start_world_creation();
+                } else if UI_WORLDS_RENAME.contains(point) {
+                    self.start_world_rename();
+                } else if UI_WORLDS_DELETE.contains(point) {
+                    self.delete_selected_world();
+                } else if UI_WORLDS_BACK.contains(point) {
+                    self.mode = AppMode::MainMenu;
+                    self.update_window_title();
+                } else if let Some(index) = world_list_hit_index(point, self.worlds.len()) {
+                    self.selected_world = index;
+                    self.update_window_title();
+                }
+            }
+            AppMode::ConfigNewWorld => {
+                if UI_CONFIG_NAME_FIELD.contains(point) {
+                    self.new_world_config.focused = ConfigField::Name;
+                    self.update_window_title();
+                } else if UI_CONFIG_SEED_FIELD.contains(point) {
+                    self.new_world_config.focused = ConfigField::Seed;
+                    self.update_window_title();
+                } else if UI_CONFIG_CREATE.contains(point) {
+                    self.create_configured_world();
+                } else if UI_CONFIG_BACK.contains(point) {
+                    self.mode = AppMode::ManageWorlds;
+                    self.update_window_title();
+                }
+            }
+            AppMode::RenamingWorld => {
+                if UI_RENAME_SAVE.contains(point) {
+                    self.finish_text_entry();
+                } else if UI_RENAME_BACK.contains(point) {
+                    self.mode = AppMode::ManageWorlds;
+                    self.text_entry = TextEntry::default();
+                    self.update_window_title();
+                }
+            }
+            AppMode::InGame if self.paused => {
+                if UI_PAUSE_KEEP_PLAYING.contains(point) {
+                    self.resume_game();
+                } else if UI_PAUSE_SAVE_QUIT.contains(point) {
+                    self.save_and_quit_to_main_menu();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn refresh_worlds(&mut self) {
+        self.worlds = self.save_store.list_worlds().unwrap_or_else(|error| {
+            eprintln!("{error}");
+            Vec::new()
+        });
+        if self.worlds.is_empty() {
+            self.selected_world = 0;
+        } else {
+            self.selected_world = self.selected_world.min(self.worlds.len() - 1);
+        }
+    }
+
+    fn select_previous_world(&mut self) {
+        if self.worlds.is_empty() {
+            return;
+        }
+        self.selected_world = self.selected_world.saturating_sub(1);
+        self.update_window_title();
+    }
+
+    fn select_next_world(&mut self) {
+        if self.worlds.is_empty() {
+            return;
+        }
+        self.selected_world = (self.selected_world + 1).min(self.worlds.len() - 1);
+        self.update_window_title();
+    }
+
+    fn start_world_creation(&mut self) {
+        self.new_world_config
+            .start(default_world_name(self.worlds.len()));
+        self.mode = AppMode::ConfigNewWorld;
+        self.update_window_title();
+    }
+
+    fn start_world_rename(&mut self) {
+        let Some(world) = self.worlds.get(self.selected_world) else {
+            return;
+        };
+        self.text_entry.start(world.name.clone());
+        self.mode = AppMode::RenamingWorld;
+        self.update_window_title();
+    }
+
+    fn finish_text_entry(&mut self) {
+        match self.mode {
+            AppMode::RenamingWorld => {
+                let Some(world) = self.worlds.get(self.selected_world) else {
+                    self.mode = AppMode::ManageWorlds;
+                    self.update_window_title();
+                    return;
+                };
+                let name = self.text_entry.finish();
+                match self.save_store.rename_world(&world.id, &name) {
+                    Ok(_) => {
+                        self.mode = AppMode::ManageWorlds;
+                        self.refresh_worlds();
+                        self.update_window_title();
+                    }
+                    Err(error) => self.report_save_error(error),
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn create_configured_world(&mut self) {
+        let name = self.new_world_config.final_name();
+        let seed = self
+            .new_world_config
+            .seed
+            .trim()
+            .parse::<u64>()
+            .unwrap_or_else(|_| new_world_seed(self.worlds.len()));
+        let placeholder_player = PlayerSave::new(
+            0.0,
+            0.0,
+            20.0,
+            -90.0_f32.to_radians(),
+            -18.0_f32.to_radians(),
+        );
+        match self
+            .save_store
+            .create_world(&name, seed, placeholder_player)
+        {
+            Ok(metadata) => {
+                self.refresh_worlds();
+                if let Some(index) = self.worlds.iter().position(|world| world.id == metadata.id) {
+                    self.selected_world = index;
+                }
+                self.load_world(metadata);
+            }
+            Err(error) => self.report_save_error(error),
+        }
+    }
+
+    fn delete_selected_world(&mut self) {
+        let Some(world) = self.worlds.get(self.selected_world) else {
+            return;
+        };
+        let id = world.id.clone();
+        if let Err(error) = self.save_store.delete_world(&id) {
+            self.report_save_error(error);
+            return;
+        }
+        self.refresh_worlds();
+        self.update_window_title();
+    }
+
+    fn load_selected_world(&mut self) {
+        let Some(metadata) = self.worlds.get(self.selected_world).cloned() else {
+            self.start_world_creation();
+            return;
+        };
+        self.load_world(metadata);
+    }
+
+    fn load_world(&mut self, mut metadata: WorldMetadata) {
+        let content = bootstrap_content().expect("content should bootstrap");
+        let pipeline = default_generation_pipeline(content.block_ids);
+        let generation_context = GenerationContext {
+            seed: metadata.seed,
+            air: content.block_ids.air,
+        };
+        let mut world = ClientWorld::new(
+            content.blocks,
+            content.block_ids,
+            pipeline,
+            generation_context,
+            CLIENT_RENDER_DISTANCE_CHUNKS,
+            metadata.id.clone(),
+        );
+
+        let saved_eye = Vec3::new(
+            metadata.player.eye_x,
+            metadata.player.eye_y,
+            metadata.player.eye_z,
+        );
+        let generated_chunks = world.ensure_chunks_around_render_position_with_store(
+            saved_eye,
+            usize::MAX,
+            &self.save_store,
+        );
+        let spawn_eye = if metadata.player.eye_y == 0.0 {
+            world.safe_spawn_eye_position(Vec3::new(0.0, 0.0, 20.0))
+        } else {
+            saved_eye
+        };
+        self.camera = Camera::from_save(PlayerSave::new(
+            spawn_eye.x,
+            spawn_eye.y,
+            spawn_eye.z,
+            metadata.player.yaw,
+            metadata.player.pitch,
+        ));
+        metadata.player = self.camera.to_save();
+
+        self.world = Some(world);
+        self.active_world = Some(metadata);
+        self.chunk_buffers.clear();
+        self.pending_chunk_remeshes.clear();
+        self.dirty_save_chunks.clear();
+        self.player_state_dirty = false;
+        self.chunk_buffers = if let Some(world) = &self.world {
+            build_chunk_render_buffers(&self.device, world, &self.texture_atlas, &generated_chunks)
+        } else {
+            HashMap::new()
+        };
+        self.mode = AppMode::InGame;
+        self.paused = false;
+        self.input.clear_movement();
+        capture_cursor(&self.window);
+        self.update_window_title();
+    }
+
+    fn mark_dirty_chunks_for_save(&mut self, dirty_chunks: &[ChunkPosition]) {
+        let Some(world) = &self.world else {
+            return;
+        };
+        for chunk_position in unique_loaded_chunk_positions(dirty_chunks, world) {
+            self.dirty_save_chunks.insert(chunk_position);
+        }
+    }
+
+    fn mark_player_state_dirty(&mut self) {
+        if self.active_world.is_some() {
+            self.player_state_dirty = true;
+        }
+    }
+
+    fn flush_active_world_to_disk(&mut self) {
+        let Some(metadata) = self.active_world.as_mut() else {
+            return;
+        };
+        metadata.player = self.camera.to_save();
+        metadata.updated_at_unix_seconds = current_save_time();
+        let world_id = metadata.id.clone();
+        if let Err(error) = self.save_store.save_metadata(metadata) {
+            self.report_save_error(error);
+        }
+
+        if let Some(world) = &self.world {
+            let dirty_chunks: Vec<_> = self.dirty_save_chunks.iter().copied().collect();
+            for chunk_position in dirty_chunks {
+                if let Some(chunk) = world.chunks.get(&chunk_position) {
+                    if let Err(error) = self.save_store.save_chunk(&world_id, chunk) {
+                        self.report_save_error(error);
+                    }
+                }
+            }
+        }
+
+        self.dirty_save_chunks.clear();
+        self.player_state_dirty = false;
+    }
+
+    fn resume_game(&mut self) {
+        self.set_paused(false);
+    }
+
+    fn save_and_quit_to_main_menu(&mut self) {
+        self.flush_active_world_to_disk();
+        self.world = None;
+        self.active_world = None;
+        self.chunk_buffers.clear();
+        self.pending_chunk_remeshes.clear();
+        self.dirty_save_chunks.clear();
+        self.player_state_dirty = false;
+        self.input.clear_movement();
+        self.paused = true;
+        self.mode = AppMode::MainMenu;
+        self.refresh_worlds();
+        release_cursor(&self.window);
+        self.update_window_title();
+    }
+
+    fn report_save_error(&self, error: WorldSaveError) {
+        eprintln!("{error}");
+        self.window
+            .set_title(&format!("HumanCraft - Save error: {error}"));
+    }
+
+    fn with_updated_title(self) -> Self {
+        self.update_window_title();
+        self
+    }
+
+    fn update_window_title(&self) {
+        let title = match self.mode {
+            AppMode::MainMenu => "HumanCraft - Main Menu: click Play or press Enter".to_string(),
+            AppMode::ManageWorlds => {
+                if let Some(world) = self.worlds.get(self.selected_world) {
+                    format!(
+                        "HumanCraft - Worlds: {} seed {} ({}/{}) | Enter load, N new, R rename, Delete delete",
+                        world.name,
+                        world.seed,
+                        self.selected_world + 1,
+                        self.worlds.len()
+                    )
+                } else {
+                    "HumanCraft - Worlds: no saves | N create or Enter".to_string()
+                }
+            }
+            AppMode::ConfigNewWorld => format!(
+                "HumanCraft - Configure New World: name '{}', seed {} | Tab field, Enter create",
+                self.new_world_config.final_name(),
+                if self.new_world_config.seed.is_empty() {
+                    "auto"
+                } else {
+                    self.new_world_config.seed.as_str()
+                }
+            ),
+            AppMode::RenamingWorld => format!(
+                "HumanCraft - Rename world: {} | type, Enter save, Esc cancel",
+                self.text_entry.display()
+            ),
+            AppMode::InGame => self
+                .active_world
+                .as_ref()
+                .map(|world| format!("HumanCraft - {} (seed {})", world.name, world.seed))
+                .unwrap_or_else(|| "HumanCraft".to_string()),
+        };
+        self.window.set_title(&title);
     }
 }
 
@@ -985,6 +1665,23 @@ impl Camera {
             sprinting: false,
             physics_accumulator: 0.0,
         }
+    }
+
+    fn from_save(save: PlayerSave) -> Self {
+        let mut camera = Self::new(Vec3::new(save.eye_x, save.eye_y, save.eye_z));
+        camera.yaw = save.yaw;
+        camera.pitch = save.pitch;
+        camera
+    }
+
+    fn to_save(self) -> PlayerSave {
+        PlayerSave::new(
+            self.position.x,
+            self.position.y,
+            self.position.z,
+            self.yaw,
+            self.pitch,
+        )
     }
 
     fn update(&mut self, input: &InputState, world: &ClientWorld, delta_seconds: f32) {
@@ -1265,6 +1962,7 @@ struct WorldBlockPosition {
 }
 
 struct ClientWorld {
+    world_id: String,
     chunks: HashMap<ChunkPosition, Chunk>,
     blocks: BlockRegistry,
     block_ids: BlockIds,
@@ -1281,8 +1979,10 @@ impl ClientWorld {
         generation_pipeline: GenerationPipeline,
         generation_context: GenerationContext,
         render_distance_chunks: i32,
+        world_id: String,
     ) -> Self {
         Self {
+            world_id,
             chunks: HashMap::new(),
             blocks,
             block_ids,
@@ -1297,10 +1997,33 @@ impl ClientWorld {
         self.chunks.insert(chunk.position(), chunk);
     }
 
+    #[cfg(test)]
     fn ensure_chunks_around_render_position(
         &mut self,
         position: Vec3,
         max_new_chunks: usize,
+    ) -> Vec<ChunkPosition> {
+        self.ensure_chunks_around_render_position_with_saves(position, max_new_chunks, None)
+    }
+
+    fn ensure_chunks_around_render_position_with_store(
+        &mut self,
+        position: Vec3,
+        max_new_chunks: usize,
+        save_store: &WorldSaveStore,
+    ) -> Vec<ChunkPosition> {
+        self.ensure_chunks_around_render_position_with_saves(
+            position,
+            max_new_chunks,
+            Some(save_store),
+        )
+    }
+
+    fn ensure_chunks_around_render_position_with_saves(
+        &mut self,
+        position: Vec3,
+        max_new_chunks: usize,
+        save_store: Option<&WorldSaveStore>,
     ) -> Vec<ChunkPosition> {
         let center = chunk_position_for_render_position(position);
         let mut dirty_chunks = HashSet::new();
@@ -1324,9 +2047,17 @@ impl ClientWorld {
         });
 
         for chunk_position in missing_chunks.into_iter().take(max_new_chunks) {
-            let chunk = self
-                .generation_pipeline
-                .generate_chunk(chunk_position, &self.generation_context);
+            let chunk = save_store
+                .and_then(|store| {
+                    store
+                        .load_chunk(&self.world_id, chunk_position)
+                        .ok()
+                        .flatten()
+                })
+                .unwrap_or_else(|| {
+                    self.generation_pipeline
+                        .generate_chunk(chunk_position, &self.generation_context)
+                });
             self.insert_chunk(chunk);
             self.mark_chunk_and_horizontal_neighbors_dirty(chunk_position, &mut dirty_chunks);
         }
@@ -2135,51 +2866,503 @@ fn release_cursor(window: &Window) {
     window.set_cursor_visible(true);
 }
 
-fn build_menu_mesh() -> (Vec<Vertex>, Vec<u32>) {
-    let vertices = vec![
-        Vertex {
-            position: [-0.42, -0.22, 0.0],
-            color: [0.05, 0.06, 0.07],
-            tex_coords: [0.0, 0.0],
-        },
-        Vertex {
-            position: [0.42, -0.22, 0.0],
-            color: [0.05, 0.06, 0.07],
-            tex_coords: [0.0, 0.0],
-        },
-        Vertex {
-            position: [0.42, 0.22, 0.0],
-            color: [0.05, 0.06, 0.07],
-            tex_coords: [0.0, 0.0],
-        },
-        Vertex {
-            position: [-0.42, 0.22, 0.0],
-            color: [0.05, 0.06, 0.07],
-            tex_coords: [0.0, 0.0],
-        },
-        Vertex {
-            position: [-0.28, -0.03, 0.0],
-            color: [0.22, 0.62, 0.18],
-            tex_coords: [0.0, 0.0],
-        },
-        Vertex {
-            position: [0.28, -0.03, 0.0],
-            color: [0.22, 0.62, 0.18],
-            tex_coords: [0.0, 0.0],
-        },
-        Vertex {
-            position: [0.28, 0.07, 0.0],
-            color: [0.22, 0.62, 0.18],
-            tex_coords: [0.0, 0.0],
-        },
-        Vertex {
-            position: [-0.28, 0.07, 0.0],
-            color: [0.22, 0.62, 0.18],
-            tex_coords: [0.0, 0.0],
-        },
-    ];
-    let indices = vec![0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7];
-    (vertices, indices)
+fn is_confirm_key(event: &KeyEvent) -> bool {
+    matches!(event.logical_key.as_ref(), Key::Named(NamedKey::Enter))
+}
+
+fn character_key(event: &KeyEvent, expected: &str) -> bool {
+    matches!(event.logical_key.as_ref(), Key::Character(character) if character.eq_ignore_ascii_case(expected))
+}
+
+fn current_save_time() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
+#[derive(Debug, Copy, Clone)]
+struct UiPoint {
+    x: f32,
+    y: f32,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct UiRect {
+    left: f32,
+    right: f32,
+    bottom: f32,
+    top: f32,
+}
+
+impl UiRect {
+    const fn new(left: f32, bottom: f32, right: f32, top: f32) -> Self {
+        Self {
+            left,
+            right,
+            bottom,
+            top,
+        }
+    }
+
+    fn contains(self, point: UiPoint) -> bool {
+        point.x >= self.left
+            && point.x <= self.right
+            && point.y >= self.bottom
+            && point.y <= self.top
+    }
+
+    fn center_x(self) -> f32 {
+        (self.left + self.right) * 0.5
+    }
+
+    fn center_y(self) -> f32 {
+        (self.bottom + self.top) * 0.5
+    }
+}
+
+const UI_MAIN_PLAY: UiRect = UiRect::new(-0.28, -0.05, 0.28, 0.08);
+const UI_WORLDS_PLAY: UiRect = UiRect::new(0.38, 0.42, 0.78, 0.54);
+const UI_WORLDS_NEW: UiRect = UiRect::new(0.38, 0.25, 0.78, 0.37);
+const UI_WORLDS_RENAME: UiRect = UiRect::new(0.38, 0.08, 0.78, 0.20);
+const UI_WORLDS_DELETE: UiRect = UiRect::new(0.38, -0.09, 0.78, 0.03);
+const UI_WORLDS_BACK: UiRect = UiRect::new(0.38, -0.46, 0.78, -0.34);
+const UI_CONFIG_NAME_FIELD: UiRect = UiRect::new(-0.30, 0.22, 0.54, 0.34);
+const UI_CONFIG_SEED_FIELD: UiRect = UiRect::new(-0.30, -0.02, 0.54, 0.10);
+const UI_CONFIG_CREATE: UiRect = UiRect::new(-0.30, -0.32, 0.04, -0.20);
+const UI_CONFIG_BACK: UiRect = UiRect::new(0.20, -0.32, 0.54, -0.20);
+const UI_RENAME_SAVE: UiRect = UiRect::new(-0.30, -0.20, 0.04, -0.08);
+const UI_RENAME_BACK: UiRect = UiRect::new(0.20, -0.20, 0.54, -0.08);
+const UI_PAUSE_KEEP_PLAYING: UiRect = UiRect::new(-0.46, -0.08, -0.02, 0.05);
+const UI_PAUSE_SAVE_QUIT: UiRect = UiRect::new(0.02, -0.08, 0.46, 0.05);
+
+fn world_list_hit_index(point: UiPoint, world_count: usize) -> Option<usize> {
+    let count = world_count.min(7);
+    for index in 0..count {
+        let top = 0.45 - index as f32 * 0.13;
+        let rect = UiRect::new(-0.78, top - 0.10, 0.26, top);
+        if rect.contains(point) {
+            return Some(index);
+        }
+    }
+    None
+}
+
+fn build_menu_mesh(state: &RenderState) -> (Vec<Vertex>, Vec<u32>) {
+    let mut ui = UiMeshBuilder::default();
+    match state.mode {
+        AppMode::MainMenu => {
+            ui.rect(UiRect::new(-1.0, -1.0, 1.0, 1.0), [0.11, 0.13, 0.14]);
+            ui.center_text(0.0, 0.52, 0.018, [0.92, 0.92, 0.88], "HUMANCRAFT");
+            ui.button(UI_MAIN_PLAY, "PLAY", false);
+        }
+        AppMode::ManageWorlds => {
+            ui.rect(UiRect::new(-1.0, -1.0, 1.0, 1.0), [0.10, 0.12, 0.13]);
+            ui.center_text(0.0, 0.72, 0.012, [0.92, 0.92, 0.88], "MANAGE WORLDS");
+            if state.worlds.is_empty() {
+                ui.text(-0.76, 0.40, 0.007, [0.82, 0.82, 0.78], "NO WORLDS YET");
+                ui.text(
+                    -0.76,
+                    0.28,
+                    0.006,
+                    [0.64, 0.66, 0.66],
+                    "CREATE A WORLD TO START",
+                );
+            } else {
+                for (index, world) in state.worlds.iter().take(7).enumerate() {
+                    let top = 0.45 - index as f32 * 0.13;
+                    let rect = UiRect::new(-0.78, top - 0.10, 0.26, top);
+                    ui.rect(
+                        rect,
+                        if index == state.selected_world {
+                            [0.32, 0.36, 0.34]
+                        } else {
+                            [0.18, 0.20, 0.20]
+                        },
+                    );
+                    ui.text(
+                        rect.left + 0.03,
+                        rect.top - 0.028,
+                        0.0048,
+                        [0.95, 0.95, 0.90],
+                        &world.name,
+                    );
+                    ui.text(
+                        rect.left + 0.03,
+                        rect.bottom + 0.030,
+                        0.0036,
+                        [0.66, 0.68, 0.68],
+                        &format!("SEED {}", world.seed),
+                    );
+                }
+            }
+            ui.button(UI_WORLDS_PLAY, "PLAY", false);
+            ui.button(UI_WORLDS_NEW, "NEW WORLD", false);
+            ui.button(UI_WORLDS_RENAME, "RENAME", state.worlds.is_empty());
+            ui.button(UI_WORLDS_DELETE, "DELETE", state.worlds.is_empty());
+            ui.button(UI_WORLDS_BACK, "BACK", false);
+        }
+        AppMode::ConfigNewWorld => {
+            ui.rect(UiRect::new(-1.0, -1.0, 1.0, 1.0), [0.10, 0.12, 0.13]);
+            ui.center_text(0.0, 0.68, 0.012, [0.92, 0.92, 0.88], "CONFIG NEW WORLD");
+            ui.text(-0.54, 0.38, 0.006, [0.85, 0.85, 0.80], "WORLD NAME");
+            ui.field(
+                UI_CONFIG_NAME_FIELD,
+                &state.new_world_config.name,
+                state.new_world_config.focused == ConfigField::Name,
+            );
+            ui.text(-0.54, 0.14, 0.006, [0.85, 0.85, 0.80], "SEED");
+            ui.field(
+                UI_CONFIG_SEED_FIELD,
+                if state.new_world_config.seed.is_empty() {
+                    "AUTO"
+                } else {
+                    &state.new_world_config.seed
+                },
+                state.new_world_config.focused == ConfigField::Seed,
+            );
+            ui.text(
+                -0.54,
+                -0.08,
+                0.005,
+                [0.64, 0.66, 0.66],
+                "SAME NUMERIC SEED RECREATES TERRAIN",
+            );
+            ui.button(UI_CONFIG_CREATE, "CREATE", false);
+            ui.button(UI_CONFIG_BACK, "BACK", false);
+        }
+        AppMode::RenamingWorld => {
+            ui.rect(UiRect::new(-1.0, -1.0, 1.0, 1.0), [0.10, 0.12, 0.13]);
+            ui.center_text(0.0, 0.58, 0.012, [0.92, 0.92, 0.88], "RENAME WORLD");
+            ui.field(
+                UI_CONFIG_NAME_FIELD,
+                self_clamped_text(state.text_entry.display()),
+                true,
+            );
+            ui.button(UI_RENAME_SAVE, "SAVE", false);
+            ui.button(UI_RENAME_BACK, "BACK", false);
+        }
+        AppMode::InGame => {
+            ui.rect(UiRect::new(-0.52, -0.22, 0.52, 0.30), [0.08, 0.09, 0.10]);
+            ui.center_text(0.0, 0.16, 0.012, [0.92, 0.92, 0.88], "PAUSED");
+            ui.button(UI_PAUSE_KEEP_PLAYING, "KEEP PLAYING", false);
+            ui.button(UI_PAUSE_SAVE_QUIT, "SAVE & QUIT", false);
+        }
+    }
+    ui.finish()
+}
+
+fn self_clamped_text(text: &str) -> &str {
+    text
+}
+
+#[derive(Default)]
+struct UiMeshBuilder {
+    vertices: Vec<Vertex>,
+    indices: Vec<u32>,
+}
+
+impl UiMeshBuilder {
+    fn finish(self) -> (Vec<Vertex>, Vec<u32>) {
+        (self.vertices, self.indices)
+    }
+
+    fn button(&mut self, rect: UiRect, label: &str, disabled: bool) {
+        self.rect(
+            rect,
+            if disabled {
+                [0.16, 0.16, 0.16]
+            } else {
+                [0.24, 0.24, 0.24]
+            },
+        );
+        self.rect(
+            UiRect::new(
+                rect.left + 0.008,
+                rect.bottom + 0.008,
+                rect.right - 0.008,
+                rect.top - 0.008,
+            ),
+            if disabled {
+                [0.24, 0.24, 0.24]
+            } else {
+                [0.42, 0.42, 0.40]
+            },
+        );
+        if !disabled {
+            self.rect(
+                UiRect::new(
+                    rect.left + 0.014,
+                    rect.top - 0.022,
+                    rect.right - 0.014,
+                    rect.top - 0.012,
+                ),
+                [0.64, 0.64, 0.60],
+            );
+            self.rect(
+                UiRect::new(
+                    rect.left + 0.014,
+                    rect.bottom + 0.012,
+                    rect.right - 0.014,
+                    rect.bottom + 0.022,
+                ),
+                [0.29, 0.29, 0.28],
+            );
+        }
+        let scale = button_label_scale(label, rect);
+        self.center_text(
+            rect.center_x(),
+            rect.center_y() + 3.5 * scale,
+            scale,
+            if disabled {
+                [0.50, 0.50, 0.50]
+            } else {
+                [0.95, 0.95, 0.92]
+            },
+            label,
+        );
+    }
+
+    fn field(&mut self, rect: UiRect, value: &str, focused: bool) {
+        self.rect(
+            rect,
+            if focused {
+                [0.48, 0.48, 0.42]
+            } else {
+                [0.24, 0.25, 0.25]
+            },
+        );
+        self.rect(
+            UiRect::new(
+                rect.left + 0.006,
+                rect.bottom + 0.006,
+                rect.right - 0.006,
+                rect.top - 0.006,
+            ),
+            [0.12, 0.13, 0.13],
+        );
+        self.text(
+            rect.left + 0.025,
+            rect.bottom + 0.040,
+            0.0058,
+            [0.94, 0.94, 0.90],
+            value,
+        );
+    }
+
+    fn rect(&mut self, rect: UiRect, color: [f32; 3]) {
+        let base = self.vertices.len() as u32;
+        self.vertices.extend_from_slice(&[
+            Vertex {
+                position: [rect.left, rect.bottom, 0.0],
+                color,
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [rect.right, rect.bottom, 0.0],
+                color,
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [rect.right, rect.top, 0.0],
+                color,
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [rect.left, rect.top, 0.0],
+                color,
+                tex_coords: [0.0, 0.0],
+            },
+        ]);
+        self.indices
+            .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+
+    fn center_text(&mut self, center_x: f32, y: f32, scale: f32, color: [f32; 3], text: &str) {
+        let width = text.chars().count() as f32 * 6.0 * scale;
+        self.text(center_x - width * 0.5, y, scale, color, text);
+    }
+
+    fn text(&mut self, x: f32, y: f32, scale: f32, color: [f32; 3], text: &str) {
+        let mut cursor_x = x;
+        for character in text.chars() {
+            self.glyph(cursor_x, y, scale, color, character);
+            cursor_x += 6.0 * scale;
+        }
+    }
+
+    fn glyph(&mut self, x: f32, y: f32, scale: f32, color: [f32; 3], character: char) {
+        let glyph = glyph_rows(character);
+        for (row, bits) in glyph.iter().enumerate() {
+            for (column, bit) in bits.chars().enumerate() {
+                if bit == '1' {
+                    let left = x + column as f32 * scale;
+                    let top = y - row as f32 * scale;
+                    self.rect(UiRect::new(left, top - scale, left + scale, top), color);
+                }
+            }
+        }
+    }
+}
+
+fn button_label_scale(label: &str, rect: UiRect) -> f32 {
+    let max_width = (rect.right - rect.left - 0.06).max(0.08);
+    let base = 0.0054;
+    let text_width = label.chars().count() as f32 * 6.0 * base;
+    if text_width <= max_width {
+        base
+    } else {
+        (max_width / (label.chars().count() as f32 * 6.0)).max(0.0038)
+    }
+}
+
+fn glyph_rows(character: char) -> [&'static str; 7] {
+    match character.to_ascii_uppercase() {
+        'A' => [
+            "01110", "10001", "10001", "11111", "10001", "10001", "10001",
+        ],
+        'B' => [
+            "11110", "10001", "10001", "11110", "10001", "10001", "11110",
+        ],
+        'C' => [
+            "01111", "10000", "10000", "10000", "10000", "10000", "01111",
+        ],
+        'D' => [
+            "11110", "10001", "10001", "10001", "10001", "10001", "11110",
+        ],
+        'E' => [
+            "11111", "10000", "10000", "11110", "10000", "10000", "11111",
+        ],
+        'F' => [
+            "11111", "10000", "10000", "11110", "10000", "10000", "10000",
+        ],
+        'G' => [
+            "01111", "10000", "10000", "10111", "10001", "10001", "01111",
+        ],
+        'H' => [
+            "10001", "10001", "10001", "11111", "10001", "10001", "10001",
+        ],
+        'I' => [
+            "11111", "00100", "00100", "00100", "00100", "00100", "11111",
+        ],
+        'J' => [
+            "00111", "00010", "00010", "00010", "10010", "10010", "01100",
+        ],
+        'K' => [
+            "10001", "10010", "10100", "11000", "10100", "10010", "10001",
+        ],
+        'L' => [
+            "10000", "10000", "10000", "10000", "10000", "10000", "11111",
+        ],
+        'M' => [
+            "10001", "11011", "10101", "10101", "10001", "10001", "10001",
+        ],
+        'N' => [
+            "10001", "11001", "10101", "10011", "10001", "10001", "10001",
+        ],
+        'O' => [
+            "01110", "10001", "10001", "10001", "10001", "10001", "01110",
+        ],
+        'P' => [
+            "11110", "10001", "10001", "11110", "10000", "10000", "10000",
+        ],
+        'Q' => [
+            "01110", "10001", "10001", "10001", "10101", "10010", "01101",
+        ],
+        'R' => [
+            "11110", "10001", "10001", "11110", "10100", "10010", "10001",
+        ],
+        'S' => [
+            "01111", "10000", "10000", "01110", "00001", "00001", "11110",
+        ],
+        'T' => [
+            "11111", "00100", "00100", "00100", "00100", "00100", "00100",
+        ],
+        'U' => [
+            "10001", "10001", "10001", "10001", "10001", "10001", "01110",
+        ],
+        'V' => [
+            "10001", "10001", "10001", "10001", "10001", "01010", "00100",
+        ],
+        'W' => [
+            "10001", "10001", "10001", "10101", "10101", "10101", "01010",
+        ],
+        'X' => [
+            "10001", "10001", "01010", "00100", "01010", "10001", "10001",
+        ],
+        'Y' => [
+            "10001", "10001", "01010", "00100", "00100", "00100", "00100",
+        ],
+        'Z' => [
+            "11111", "00001", "00010", "00100", "01000", "10000", "11111",
+        ],
+        '0' => [
+            "01110", "10001", "10011", "10101", "11001", "10001", "01110",
+        ],
+        '1' => [
+            "00100", "01100", "00100", "00100", "00100", "00100", "01110",
+        ],
+        '2' => [
+            "01110", "10001", "00001", "00010", "00100", "01000", "11111",
+        ],
+        '3' => [
+            "11110", "00001", "00001", "01110", "00001", "00001", "11110",
+        ],
+        '4' => [
+            "00010", "00110", "01010", "10010", "11111", "00010", "00010",
+        ],
+        '5' => [
+            "11111", "10000", "10000", "11110", "00001", "00001", "11110",
+        ],
+        '6' => [
+            "01110", "10000", "10000", "11110", "10001", "10001", "01110",
+        ],
+        '7' => [
+            "11111", "00001", "00010", "00100", "01000", "01000", "01000",
+        ],
+        '8' => [
+            "01110", "10001", "10001", "01110", "10001", "10001", "01110",
+        ],
+        '9' => [
+            "01110", "10001", "10001", "01111", "00001", "00001", "01110",
+        ],
+        '&' => [
+            "01100", "10010", "10100", "01000", "10101", "10010", "01101",
+        ],
+        ':' => [
+            "00000", "00100", "00100", "00000", "00100", "00100", "00000",
+        ],
+        '-' => [
+            "00000", "00000", "00000", "11111", "00000", "00000", "00000",
+        ],
+        '_' => [
+            "00000", "00000", "00000", "00000", "00000", "00000", "11111",
+        ],
+        '/' => [
+            "00001", "00010", "00010", "00100", "01000", "01000", "10000",
+        ],
+        '.' => [
+            "00000", "00000", "00000", "00000", "00000", "01100", "01100",
+        ],
+        ',' => [
+            "00000", "00000", "00000", "00000", "00100", "00100", "01000",
+        ],
+        '\'' => [
+            "00100", "00100", "01000", "00000", "00000", "00000", "00000",
+        ],
+        '(' => [
+            "00010", "00100", "01000", "01000", "01000", "00100", "00010",
+        ],
+        ')' => [
+            "01000", "00100", "00010", "00010", "00010", "00100", "01000",
+        ],
+        ' ' => [
+            "00000", "00000", "00000", "00000", "00000", "00000", "00000",
+        ],
+        _ => [
+            "11111", "00001", "00010", "00100", "00100", "00000", "00100",
+        ],
+    }
 }
 
 fn build_crosshair_mesh(width: u32, height: u32) -> (Vec<Vertex>, Vec<u32>) {
@@ -2436,6 +3619,7 @@ mod tests {
                 air: content.block_ids.air,
             },
             CLIENT_RENDER_DISTANCE_CHUNKS,
+            "test-world".to_string(),
         )
     }
 
@@ -2736,6 +3920,49 @@ mod tests {
         });
 
         assert_eq!(first_block, second_block);
+    }
+
+    #[test]
+    fn saved_chunks_override_generation_when_streaming() {
+        let content = bootstrap_content().unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "humancraft-window-save-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let store = WorldSaveStore::new(&root);
+        let metadata = store
+            .create_world("Saved Chunk", 1, PlayerSave::new(0.0, 0.0, 0.0, 0.0, 0.0))
+            .unwrap();
+        let chunk_position = ChunkPosition { x: 0, z: 0 };
+        let mut saved_chunk = Chunk::filled(chunk_position, content.block_ids.air);
+        saved_chunk
+            .set_block(
+                BlockPosition { x: 8, y: 64, z: 8 },
+                content.block_ids.diamond_ore,
+            )
+            .unwrap();
+        store.save_chunk(&metadata.id, &saved_chunk).unwrap();
+
+        let mut world = ClientWorld::new(
+            content.blocks.clone(),
+            content.block_ids,
+            default_generation_pipeline(content.block_ids),
+            GenerationContext {
+                seed: metadata.seed,
+                air: content.block_ids.air,
+            },
+            CLIENT_RENDER_DISTANCE_CHUNKS,
+            metadata.id.clone(),
+        );
+        world.ensure_chunks_around_render_position_with_store(Vec3::ZERO, usize::MAX, &store);
+
+        assert_eq!(
+            world.block(WorldBlockPosition { x: 8, y: 64, z: 8 }),
+            Some(content.block_ids.diamond_ore)
+        );
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
