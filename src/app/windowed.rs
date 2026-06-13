@@ -130,8 +130,25 @@ const MAX_CHUNK_LOADS_PER_FRAME: usize = 2;
 const MAX_CHUNK_REMESHES_PER_FRAME: usize = 3;
 const CHUNK_WORLD_SIZE: f32 = 16.0;
 const PLAYER_HEIGHT: f32 = 1.8;
-const PLAYER_EYE_HEIGHT: f32 = 1.62;
+const PLAYER_STANDING_EYE_HEIGHT: f32 = 1.62;
+const PLAYER_SNEAKING_EYE_HEIGHT: f32 = 1.54;
 const PLAYER_RADIUS: f32 = 0.3;
+const PHYSICS_TICK_SECONDS: f32 = 0.05;
+const WALK_ACCELERATION: f32 = 0.13;
+const AIR_ACCELERATION: f32 = 0.03;
+const GROUND_FRICTION: f32 = 0.546;
+const AIR_HORIZONTAL_DRAG: f32 = 0.91;
+const SPRINT_MULTIPLIER: f32 = 1.3;
+const SNEAK_MULTIPLIER: f32 = 0.3;
+const JUMP_VELOCITY: f32 = 0.46;
+const SPRINT_JUMP_BOOST: f32 = 0.2;
+const GRAVITY_PER_TICK: f32 = 0.08;
+const AIR_DRAG: f32 = 0.98;
+const STEP_HEIGHT: f32 = 0.6;
+const SNEAK_EDGE_PROBE_DEPTH: f32 = 0.08;
+const SPRINT_DOUBLE_TAP_SECONDS: f32 = 0.3;
+const NORMAL_FOV_DEGREES: f32 = 70.0;
+const SPRINT_FOV_DEGREES: f32 = 78.0;
 
 pub fn run_windowed_game() {
     let event_loop = EventLoop::new().expect("event loop should be created");
@@ -947,8 +964,12 @@ struct Camera {
     position: Vec3,
     yaw: f32,
     pitch: f32,
+    horizontal_velocity: Vec3,
     vertical_velocity: f32,
     grounded: bool,
+    sneaking: bool,
+    sprinting: bool,
+    physics_accumulator: f32,
 }
 
 impl Camera {
@@ -957,13 +978,35 @@ impl Camera {
             position,
             yaw: -90.0_f32.to_radians(),
             pitch: -18.0_f32.to_radians(),
+            horizontal_velocity: Vec3::ZERO,
             vertical_velocity: 0.0,
             grounded: false,
+            sneaking: false,
+            sprinting: false,
+            physics_accumulator: 0.0,
         }
     }
 
     fn update(&mut self, input: &InputState, world: &ClientWorld, delta_seconds: f32) {
-        let move_speed = 8.0;
+        self.physics_accumulator += delta_seconds;
+        while self.physics_accumulator >= PHYSICS_TICK_SECONDS {
+            self.tick(input, world);
+            self.physics_accumulator -= PHYSICS_TICK_SECONDS;
+        }
+
+        if self.position.y < -80.0 {
+            self.position = world.safe_spawn_eye_position(Vec3::new(0.0, 0.0, 20.0));
+            self.horizontal_velocity = Vec3::ZERO;
+            self.vertical_velocity = 0.0;
+            self.grounded = false;
+            self.physics_accumulator = 0.0;
+        }
+    }
+
+    fn tick(&mut self, input: &InputState, world: &ClientWorld) {
+        self.update_sneaking(input.sneak, world);
+        self.sprinting = input.sprint && input.forward && !input.sneak;
+
         let forward = self.forward();
         let flat_forward = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
         let right = flat_forward.cross(Vec3::Y).normalize_or_zero();
@@ -983,31 +1026,108 @@ impl Camera {
         }
 
         if movement.length_squared() > 0.0 {
-            let delta = movement.normalize() * move_speed * delta_seconds;
-            self.try_move(Vec3::new(delta.x, 0.0, 0.0), world);
-            self.try_move(Vec3::new(0.0, 0.0, delta.z), world);
+            let mut acceleration = if self.grounded {
+                WALK_ACCELERATION
+            } else {
+                AIR_ACCELERATION
+            };
+            if self.sprinting {
+                acceleration *= SPRINT_MULTIPLIER;
+            }
+            if input.sneak {
+                acceleration *= SNEAK_MULTIPLIER;
+            }
+            self.horizontal_velocity += movement.normalize() * acceleration;
         }
 
-        if input.jump && self.grounded {
-            self.vertical_velocity = 8.0;
+        let jumped = input.jump && self.grounded;
+        if jumped {
+            self.vertical_velocity = JUMP_VELOCITY;
+            if self.sprinting {
+                self.horizontal_velocity += flat_forward * SPRINT_JUMP_BOOST;
+            }
             self.grounded = false;
         }
 
-        self.vertical_velocity -= 22.0 * delta_seconds;
+        if !jumped {
+            self.vertical_velocity -= GRAVITY_PER_TICK;
+            self.vertical_velocity *= AIR_DRAG;
+        }
         self.grounded = false;
-        let vertical_delta = Vec3::new(0.0, self.vertical_velocity * delta_seconds, 0.0);
+        let vertical_delta = Vec3::new(0.0, self.vertical_velocity, 0.0);
         if !self.try_move(vertical_delta, world) {
             if vertical_delta.y < 0.0 {
                 self.grounded = true;
             }
             self.vertical_velocity = 0.0;
         }
-
-        if self.position.y < -80.0 {
-            self.position = world.safe_spawn_eye_position(Vec3::new(0.0, 0.0, 20.0));
-            self.vertical_velocity = 0.0;
-            self.grounded = false;
+        if jumped && self.vertical_velocity != 0.0 {
+            self.vertical_velocity -= GRAVITY_PER_TICK;
+            self.vertical_velocity *= AIR_DRAG;
         }
+
+        self.move_horizontally(world, input.sneak);
+        self.horizontal_velocity *= if self.grounded {
+            GROUND_FRICTION
+        } else {
+            AIR_HORIZONTAL_DRAG
+        };
+    }
+
+    fn update_sneaking(&mut self, sneak: bool, world: &ClientWorld) {
+        if self.sneaking == sneak {
+            return;
+        }
+
+        let old_eye_height = self.eye_height();
+        self.sneaking = sneak;
+        let new_eye_height = self.eye_height();
+        let adjusted = self.position + Vec3::Y * (new_eye_height - old_eye_height);
+        if world.collides_player_at_eye_height(adjusted, new_eye_height) {
+            self.sneaking = !sneak;
+        } else {
+            self.position = adjusted;
+        }
+    }
+
+    fn move_horizontally(&mut self, world: &ClientWorld, sneak: bool) {
+        let delta_x = Vec3::new(self.horizontal_velocity.x, 0.0, 0.0);
+        if !self.try_horizontal_move(delta_x, world, sneak) && self.grounded {
+            self.horizontal_velocity.x = 0.0;
+        }
+
+        let delta_z = Vec3::new(0.0, 0.0, self.horizontal_velocity.z);
+        if !self.try_horizontal_move(delta_z, world, sneak) && self.grounded {
+            self.horizontal_velocity.z = 0.0;
+        }
+    }
+
+    fn try_horizontal_move(&mut self, delta: Vec3, world: &ClientWorld, sneak: bool) -> bool {
+        if delta.length_squared() == 0.0 {
+            return true;
+        }
+
+        let original = self.position;
+        if self.try_move(delta, world)
+            && (!sneak
+                || !self.grounded
+                || world.has_player_ground_support(self.position, self.eye_height()))
+        {
+            return true;
+        }
+        self.position = original;
+
+        if !self.grounded || sneak {
+            return false;
+        }
+
+        if self.try_move(Vec3::Y * STEP_HEIGHT, world) && self.try_move(delta, world) {
+            self.try_move(Vec3::Y * -STEP_HEIGHT, world);
+            return true;
+        }
+
+        self.position = original;
+        false
     }
 
     fn try_move(&mut self, delta: Vec3, world: &ClientWorld) -> bool {
@@ -1016,7 +1136,7 @@ impl Camera {
         }
 
         let next = self.position + delta;
-        if world.collides_player_at(next) {
+        if world.collides_player_at_eye_height(next, self.eye_height()) {
             return false;
         }
 
@@ -1033,8 +1153,21 @@ impl Camera {
     fn view_projection(&self, width: u32, height: u32) -> Mat4 {
         let aspect = width.max(1) as f32 / height.max(1) as f32;
         let view = Mat4::look_to_rh(self.position, self.forward(), Vec3::Y);
-        let projection = Mat4::perspective_rh(60.0_f32.to_radians(), aspect, 0.1, 500.0);
+        let fov = if self.sprinting {
+            SPRINT_FOV_DEGREES
+        } else {
+            NORMAL_FOV_DEGREES
+        };
+        let projection = Mat4::perspective_rh(fov.to_radians(), aspect, 0.1, 500.0);
         projection * view
+    }
+
+    fn eye_height(&self) -> f32 {
+        if self.sneaking {
+            PLAYER_SNEAKING_EYE_HEIGHT
+        } else {
+            PLAYER_STANDING_EYE_HEIGHT
+        }
     }
 
     fn forward(&self) -> Vec3 {
@@ -1054,25 +1187,50 @@ struct InputState {
     left: bool,
     right: bool,
     jump: bool,
+    sneak: bool,
+    sprint: bool,
+    last_forward_press: Option<Instant>,
 }
 
 impl InputState {
     fn handle_key(&mut self, event: &KeyEvent) {
         let pressed = event.state == ElementState::Pressed;
-        self.handle_logical_key(event.logical_key.as_ref(), pressed);
+        self.handle_logical_key_at(event.logical_key.as_ref(), pressed, Instant::now());
 
         if let PhysicalKey::Code(code) = event.physical_key {
             match code {
                 KeyCode::Space => self.jump = pressed,
+                KeyCode::ShiftLeft | KeyCode::ShiftRight => self.sneak = pressed,
                 _ => {}
             }
         }
+
+        if matches!(event.logical_key.as_ref(), Key::Named(NamedKey::Shift)) {
+            self.sneak = pressed;
+        }
     }
 
+    #[cfg(test)]
     fn handle_logical_key(&mut self, key: Key<&str>, pressed: bool) {
+        self.handle_logical_key_at(key, pressed, Instant::now());
+    }
+
+    fn handle_logical_key_at(&mut self, key: Key<&str>, pressed: bool, now: Instant) {
         match key {
             Key::Character(character) => match character.to_lowercase().as_str() {
-                "z" => self.forward = pressed,
+                "z" => {
+                    if pressed && !self.forward {
+                        if self.last_forward_press.is_some_and(|last| {
+                            now.duration_since(last).as_secs_f32() <= SPRINT_DOUBLE_TAP_SECONDS
+                        }) {
+                            self.sprint = true;
+                        }
+                        self.last_forward_press = Some(now);
+                    } else if !pressed {
+                        self.sprint = false;
+                    }
+                    self.forward = pressed;
+                }
                 "s" => self.backward = pressed,
                 "q" => self.left = pressed,
                 "d" => self.right = pressed,
@@ -1088,6 +1246,8 @@ impl InputState {
         self.left = false;
         self.right = false;
         self.jump = false;
+        self.sneak = false;
+        self.sprint = false;
     }
 }
 
@@ -1248,7 +1408,7 @@ impl ClientWorld {
         world_start_y: i32,
     ) -> Option<f32> {
         for feet_y in world_start_y.max(0)..CHUNK_HEIGHT as i32 {
-            let eye_y = feet_y as f32 - 64.0 + PLAYER_EYE_HEIGHT + 0.05;
+            let eye_y = feet_y as f32 - 64.0 + PLAYER_STANDING_EYE_HEIGHT + 0.05;
             if !self.collides_player_at(Vec3::new(render_x, eye_y, render_z)) {
                 return Some(eye_y);
             }
@@ -1258,8 +1418,19 @@ impl ClientWorld {
     }
 
     fn collides_player_at(&self, eye_position: Vec3) -> bool {
-        let (min, max) = player_aabb(eye_position);
+        self.collides_player_at_eye_height(eye_position, PLAYER_STANDING_EYE_HEIGHT)
+    }
+
+    fn collides_player_at_eye_height(&self, eye_position: Vec3, eye_height: f32) -> bool {
+        let (min, max) = player_aabb_at_eye_height(eye_position, eye_height);
         self.collides_aabb(min, max)
+    }
+
+    fn has_player_ground_support(&self, eye_position: Vec3, eye_height: f32) -> bool {
+        let (min, max) = player_aabb_at_eye_height(eye_position, eye_height);
+        let probe_min = Vec3::new(min.x, min.y - SNEAK_EDGE_PROBE_DEPTH, min.z);
+        let probe_max = Vec3::new(max.x, min.y, max.z);
+        self.collides_aabb(probe_min, probe_max)
     }
 
     fn block_intersects_player(
@@ -1498,15 +1669,19 @@ fn render_z_to_block_world(render_z: f32) -> f32 {
 }
 
 fn player_aabb(eye_position: Vec3) -> (Vec3, Vec3) {
+    player_aabb_at_eye_height(eye_position, PLAYER_STANDING_EYE_HEIGHT)
+}
+
+fn player_aabb_at_eye_height(eye_position: Vec3, eye_height: f32) -> (Vec3, Vec3) {
     (
         Vec3::new(
             eye_position.x - PLAYER_RADIUS,
-            eye_position.y - PLAYER_EYE_HEIGHT,
+            eye_position.y - eye_height,
             eye_position.z - PLAYER_RADIUS,
         ),
         Vec3::new(
             eye_position.x + PLAYER_RADIUS,
-            eye_position.y - PLAYER_EYE_HEIGHT + PLAYER_HEIGHT,
+            eye_position.y - eye_height + PLAYER_HEIGHT,
             eye_position.z + PLAYER_RADIUS,
         ),
     )
@@ -2294,6 +2469,48 @@ mod tests {
     }
 
     #[test]
+    fn double_tapping_forward_enables_sprint() {
+        let mut input = InputState::default();
+        let start = Instant::now();
+
+        input.handle_logical_key_at(Key::Character("z"), true, start);
+        input.handle_logical_key_at(
+            Key::Character("z"),
+            false,
+            start + std::time::Duration::from_millis(40),
+        );
+        input.handle_logical_key_at(
+            Key::Character("z"),
+            true,
+            start + std::time::Duration::from_millis(160),
+        );
+
+        assert!(input.forward);
+        assert!(input.sprint);
+    }
+
+    #[test]
+    fn slow_forward_tap_does_not_enable_sprint() {
+        let mut input = InputState::default();
+        let start = Instant::now();
+
+        input.handle_logical_key_at(Key::Character("z"), true, start);
+        input.handle_logical_key_at(
+            Key::Character("z"),
+            false,
+            start + std::time::Duration::from_millis(40),
+        );
+        input.handle_logical_key_at(
+            Key::Character("z"),
+            true,
+            start + std::time::Duration::from_millis(600),
+        );
+
+        assert!(input.forward);
+        assert!(!input.sprint);
+    }
+
+    #[test]
     fn preview_filter_keeps_real_underground_faces_visible() {
         let content = bootstrap_content().unwrap();
         let wall = MeshQuad {
@@ -2758,6 +2975,69 @@ mod tests {
         assert_ne!(
             world_block_from_render(spawn),
             WorldBlockPosition { x: 8, y: 65, z: 8 }
+        );
+    }
+
+    #[test]
+    fn sneaking_prevents_player_from_walking_off_block_edge() {
+        let content = bootstrap_content().unwrap();
+        let mut world = test_client_world(&content);
+        let mut chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, content.block_ids.air);
+        chunk
+            .set_block(BlockPosition { x: 8, y: 63, z: 8 }, content.block_ids.stone)
+            .unwrap();
+        world.insert_chunk(chunk);
+
+        let mut camera = Camera::new(Vec3::new(0.5, PLAYER_STANDING_EYE_HEIGHT + 0.05, 0.5));
+        camera.grounded = true;
+        let input = InputState {
+            forward: true,
+            sneak: true,
+            ..InputState::default()
+        };
+
+        for _ in 0..80 {
+            camera.update(&input, &world, PHYSICS_TICK_SECONDS);
+        }
+
+        assert!(world.has_player_ground_support(camera.position, camera.eye_height()));
+    }
+
+    #[test]
+    fn player_can_jump_onto_one_block_ledge() {
+        let content = bootstrap_content().unwrap();
+        let mut world = test_client_world(&content);
+        let mut chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, content.block_ids.air);
+        for z in 8..=12 {
+            chunk
+                .set_block(BlockPosition { x: 8, y: 63, z }, content.block_ids.stone)
+                .unwrap();
+        }
+        chunk
+            .set_block(BlockPosition { x: 8, y: 64, z: 8 }, content.block_ids.stone)
+            .unwrap();
+        world.insert_chunk(chunk);
+
+        let mut camera = Camera::new(Vec3::new(0.5, PLAYER_STANDING_EYE_HEIGHT + 0.05, 4.0));
+        camera.grounded = true;
+        let mut landed_on_ledge = false;
+        for _ in 0..100 {
+            let input = InputState {
+                forward: true,
+                jump: camera.position.z <= 2.2,
+                ..InputState::default()
+            };
+            camera.update(&input, &world, PHYSICS_TICK_SECONDS);
+            let feet_y = camera.position.y - camera.eye_height();
+            if camera.grounded && feet_y >= 1.0 && camera.position.z < 1.0 {
+                landed_on_ledge = true;
+                break;
+            }
+        }
+
+        assert!(
+            landed_on_ledge,
+            "expected jump and forward movement from a short distance to land on one-block ledge"
         );
     }
 

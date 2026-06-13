@@ -17,6 +17,8 @@ Controls:
 - `S`: move backward
 - `Q`: move left
 - `D`: move right
+- Double-tap `Z`: sprint
+- Hold `Shift`: sneak
 - `Space`: jump
 - Mouse: look around
 - Left click: break the targeted block
@@ -60,7 +62,8 @@ Implemented:
 - Native `winit` + `wgpu` window
 - ZQSD camera movement
 - Captured mouse-look
-- Grounded movement with gravity and jumping
+- Grounded movement with Minecraft-style acceleration, gravity, jumping,
+  sprinting, and sneaking
 - Crosshair raycast block breaking and placing
 - Selected-block outline
 - Basic player collision AABB
@@ -68,7 +71,4 @@ Implemented:
 
 Not implemented yet:
 
-- Texture atlas using `textures/`
-- Full swept collision and step-up behavior
-- Multi-chunk world streaming
 - Saving/loading

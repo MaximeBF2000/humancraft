@@ -80,6 +80,21 @@ status file for verification notes, next steps, and implementation details.
   silently render with missing-texture fallback faces.
 - Prevented player-facing block placement inside the player entity, including
   both feet/legs and head space.
+- Reworked windowed player movement to use Minecraft-style fixed 20 Hz
+  acceleration/friction physics, jump gravity/drag values, normalized diagonal
+  input, sprint-jump boost, and sprint FOV widening.
+- Added sprint activation through a configurable double-`Z` tap window.
+- Added Shift sneaking with slower movement, lowered eye height, and edge
+  protection to prevent sneaking players from walking off unsupported block
+  edges.
+- Fixed one-block jump clearance by applying the initial jump impulse before
+  jump-start gravity/drag and preserving horizontal velocity while airborne
+  against a ledge until the player rises high enough to move onto it.
+- Tuned movement for more forgiving early playability by increasing walking
+  acceleration, air control, and jump impulse relative to strict Minecraft
+  values.
+- Added player movement documentation for players, developers, and future
+  coding agents.
 - Updated `PROGRESS.md` throughout the work with implementation notes,
   verification results, and next steps.
 - Added and ran tests covering texture metadata mapping, real stone PNG
@@ -198,6 +213,18 @@ status file for verification notes, next steps, and implementation details.
   neighbors when the edit touches a chunk boundary.
 - Replaced initial spawn placement with a safe spawn search that validates the
   full player AABB.
+- Reworked windowed player motion around a fixed 20 Hz physics tick with
+  acceleration, ground friction, air control, Minecraft jump/gravity/drag
+  values, sprint-jump boost, and diagonal movement normalization.
+- Added double-`Z` sprint input with configurable timing.
+- Added Shift sneaking with slower movement, lowered eye height, and
+  unsupported-edge prevention.
+- Added sprint FOV widening from the normal 70 degree view.
+- Fixed jump-start vertical integration and airborne horizontal collision
+  handling so jumping against a one-block ledge does not lose the height or
+  movement needed to land on it.
+- Increased movement forgiveness so one-block jumps work from a normal
+  approach distance instead of requiring near-perfect positioning.
 
 ### Skills And Tooling
 

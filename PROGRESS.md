@@ -215,6 +215,35 @@ Last updated: 2026-06-13
   to use loadable texture assets.
 - Changed player-facing placement so a block cannot be placed inside the
   player's entity AABB, including both leg and head space.
+- Reworked windowed player movement around Minecraft-style fixed-tick physics:
+  - 20 Hz physics stepping
+  - acceleration-based horizontal movement
+  - ground friction and air control
+  - Minecraft jump velocity, gravity, and air damping
+  - diagonal movement normalization through normalized input vectors
+  - sprint-jump horizontal boost
+- Added sprint movement through a configurable double-`Z` tap window.
+- Added Shift sneaking with slower movement, lowered eye height, and edge
+  protection so a sneaking player cannot walk off an unsupported block edge.
+- Added sprint FOV widening and normal 70 degree camera FOV.
+- Added focused regression tests for sprint double-tap timing and sneak edge
+  protection.
+- Fixed one-block jump clearance by applying the initial jump impulse before
+  gravity/drag on the jump-start tick and preserving blocked horizontal
+  velocity while airborne, allowing the player to keep pushing toward a ledge
+  until the jump is high enough to clear it.
+- Added regression coverage for jumping onto a one-block ledge.
+- Tuned movement away from strict Minecraft values for better early playability:
+  stronger walking acceleration, stronger air control, and a higher jump
+  impulse make one-block jumps much more forgiving while preserving the
+  fixed-tick acceleration/friction model.
+- Strengthened one-block jump regression coverage to start from a normal
+  approach distance instead of almost touching the ledge.
+- Added player-facing movement documentation in `docs/player/controls.md`.
+- Added developer movement-system documentation in
+  `docs/developer/systems/player_movement.md`.
+- Added `AGENTS.md` with movement documentation pointers for future coding
+  agents.
 - Added regression coverage for underground preview filtering, loaded-world
   bottom boundary filtering, chunk-load budgeting, player-occupied placement,
   texture coverage, and high grassy mountain tops.
@@ -229,6 +258,11 @@ Last updated: 2026-06-13
 - `cargo check` after adding PNG texture loading.
 - `cargo test` after adding texture metadata, atlas sampling, and the texture
   path test.
+- `cargo test` after the Minecraft-style movement, sprint, and sneaking
+  changes.
+- `cargo test player_can_jump_onto_one_block_ledge -- --nocapture`
+- `cargo check` and `cargo test` after fixing airborne one-block ledge jumps
+  and adding movement documentation.
 - `cargo run` launched the native game loop successfully and was stopped with
   Ctrl-C after smoke testing.
 - `cargo run` launched successfully after the multi-chunk render and AZERTY
