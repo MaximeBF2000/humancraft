@@ -41,6 +41,10 @@ status file for verification notes, next steps, and implementation details.
   neighbor refreshes only where boundary culling can change.
 - Fixed exposed bottom faces after block removal by preserving renderer-visible
   `Down` quads instead of filtering every bottom face after meshing.
+- Reduced runtime chunk-load frame drops by throttling new chunk generation to
+  a small per-frame budget.
+- Reduced chunk-load remesh/upload spikes by queuing dirty chunks and applying
+  a small per-frame mesh rebuild budget.
 - Added a reusable biome generation layer with deterministic biome lookup and
   biome-driven terrain profiles.
 - Added initial HumanCraft overworld biomes: plains, forest, and mountains.
@@ -50,6 +54,32 @@ status file for verification notes, next steps, and implementation details.
 - Smoothed terrain generation by interpolating value noise, sizing biomes as
   large chunk-based regions, and blending terrain height inside biome
   transition bands.
+- Regenerated oak log and oak leaves textures to better match reference
+  Minecraft-style bark and cut-out leaves.
+- Fixed transparent leaf rendering by discarding near-transparent texture
+  pixels in the terrain shader.
+- Expanded camera pitch so the player can look almost fully up and down.
+- Fixed the center crosshair proportions on widescreen displays.
+- Made the selected-block outline brighter and easier to see.
+- Made oak leaves more transparent by increasing cut-out pixels.
+- Added desert biome support with sand and sandstone terrain strata.
+- Added sand, sandstone, and bedrock blocks/items with generated textures.
+- Added a bedrock generation stage that guarantees bedrock at Y 0.
+- Made bedrock unbreakable through block tags respected by mining/breaking
+  systems.
+- Raised default overworld surfaces to start at Y 64 or higher.
+- Added biome relief controls for roughness and ridge-style height variation.
+- Tuned plains, forest, desert, and mountains for stronger terrain variation.
+- Added exposed mountain stone on high or steep surfaces.
+- Changed mountain exposed-stone placement to be slope-led so flatter high
+  mountaintops remain grassy.
+- Fixed underground rendering artifacts by winding terrain mesh faces outward,
+  enabling counter-clockwise terrain back-face culling, and limiting the
+  temporary preview filter to artificial loaded-world boundary faces.
+- Added ore textures and texture coverage tests so registered blocks do not
+  silently render with missing-texture fallback faces.
+- Prevented player-facing block placement inside the player entity, including
+  both feet/legs and head space.
 - Updated `PROGRESS.md` throughout the work with implementation notes,
   verification results, and next steps.
 - Added and ran tests covering texture metadata mapping, real stone PNG
@@ -73,8 +103,8 @@ status file for verification notes, next steps, and implementation details.
 - Added deterministic terrain generation.
 - Added generic ore generation driven by ore definitions.
 - Added initial content registration for air, grass, dirt, stone, coal ore,
-  iron ore, gold ore, diamond ore, oak log, oak leaves, and starter item
-  definitions.
+  iron ore, gold ore, diamond ore, oak log, oak leaves, sand, sandstone,
+  bedrock, and starter item definitions.
 
 ### World Rendering
 
@@ -87,8 +117,12 @@ status file for verification notes, next steps, and implementation details.
 - Added colored terrain rendering.
 - Changed windowed rendering from one exposed chunk to a centered `5 x 5`
   terrain patch.
-- Hid deep underground side faces and outer render-patch boundary faces so the
-  temporary finite terrain area does not render as a sliced column.
+- Hid outer render-patch boundary faces so the temporary finite terrain area
+  does not render as a sliced column.
+- Hid finite loaded-patch Y 0 bottom boundary faces while keeping legitimate
+  underground side and ceiling faces visible after block edits.
+- Switched terrain rendering to outward counter-clockwise mesh winding with
+  back-face culling, preventing top faces from rendering from underneath.
 - Switched the camera projection to the depth range expected by `wgpu`.
 - Added directional face shading for clearer untextured block faces.
 - Added PNG loading through the `image` crate.
@@ -113,10 +147,17 @@ status file for verification notes, next steps, and implementation details.
 - Added a simple client-side chunk streaming loop that keeps a square chunk
   window loaded around the player and generates missing chunks through the
   reusable world generation pipeline.
+- Added per-frame runtime chunk-load throttling so movement into new areas does
+  not generate the full render-distance patch in one frame.
+- Added a per-frame dirty chunk remesh/upload budget for streamed chunks.
 - Changed the windowed renderer to own GPU buffers per chunk instead of as one
   world-sized mesh, allowing small world updates to rebuild only affected chunk
   meshes.
 - Added texture atlas coverage for oak log and oak leaves.
+- Added alpha cut-out handling for transparent block texture pixels.
+- Added texture atlas coverage for sand, sandstone, and bedrock.
+- Added texture atlas coverage for coal ore, iron ore, gold ore, and diamond
+  ore.
 
 ### World Generation
 
@@ -124,6 +165,14 @@ status file for verification notes, next steps, and implementation details.
 - Changed terrain generation to read biome terrain profiles instead of one
   global terrain profile.
 - Added plains, forest, and mountains biome content.
+- Added desert biome content.
+- Added biome-owned terrain layer stacks, allowing sand/sandstone/stone desert
+  strata without hard-coding desert logic into the terrain stage.
+- Added bedrock generation after terrain and ores so the deepest layer is
+  always bedrock.
+- Raised default terrain profiles to keep overworld surfaces at or above Y 64.
+- Added biome relief and ridge controls, plus exposed-surface rules for
+  mountain stone.
 - Added chunk-sized biome region controls with configurable transition bands.
 - Changed terrain noise from raw cell sampling to interpolated sampling.
 - Changed biome-border terrain to blend neighboring biome height profiles.
@@ -179,7 +228,8 @@ status file for verification notes, next steps, and implementation details.
   render filtering, coordinate splitting, mutable client-world block edits,
   raycasting, player AABB collision, selected-block outline geometry, texture
   metadata mapping, texture loading, safe spawn placement, biome lookup, biome
-  registration, biome-region sizing, terrain continuity, and tree generation.
+  registration, biome-region sizing, terrain continuity, camera pitch range,
+  crosshair aspect compensation, oak leaf cut-out alpha, and tree generation.
 - Verified the project repeatedly with:
   - `cargo fmt`
   - `cargo check`

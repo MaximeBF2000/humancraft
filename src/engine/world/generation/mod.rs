@@ -13,6 +13,7 @@
 //! Add new stages for caves, water, trees, decorations, and structures without
 //! changing existing stage implementations.
 
+pub mod bedrock;
 pub mod biome;
 pub mod ore;
 pub mod terrain;

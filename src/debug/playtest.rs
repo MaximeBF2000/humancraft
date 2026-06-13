@@ -124,6 +124,16 @@ pub fn mine_surface(
     z: usize,
 ) {
     if let Some(y) = surface_at(chunk, blocks, x, z) {
+        let Some(block) = chunk.block(BlockPosition { x, y, z }) else {
+            return;
+        };
+        if blocks
+            .get(block)
+            .map(|definition| definition.has_tag("unbreakable"))
+            .unwrap_or(false)
+        {
+            return;
+        }
         chunk
             .set_block(BlockPosition { x, y, z }, air)
             .expect("surface positions stay inside chunk bounds");

@@ -14,11 +14,16 @@ pub struct BiomeDefinition {
     pub surface: BlockId,
     pub subsurface: BlockId,
     pub stone: BlockId,
+    pub layers: Vec<TerrainLayer>,
     pub base_height: usize,
     pub height_variation: usize,
     pub dirt_depth: usize,
     pub terrain_scale: i32,
     pub detail_scale: i32,
+    pub roughness: f32,
+    pub ridge_strength: f32,
+    pub ridge_scale: i32,
+    pub exposed_surface: Option<ExposedSurfaceRule>,
 }
 
 impl BiomeDefinition {
@@ -28,16 +33,26 @@ impl BiomeDefinition {
         subsurface: BlockId,
         stone: BlockId,
     ) -> Self {
+        let surface = surface;
+        let subsurface = subsurface;
         Self {
             key: key.into(),
             surface,
             subsurface,
             stone,
+            layers: vec![
+                TerrainLayer::new(surface, 1),
+                TerrainLayer::new(subsurface, 4),
+            ],
             base_height: 64,
             height_variation: 16,
             dirt_depth: 4,
             terrain_scale: 8,
             detail_scale: 3,
+            roughness: 0.0,
+            ridge_strength: 0.0,
+            ridge_scale: 24,
+            exposed_surface: None,
         }
     }
 
@@ -54,7 +69,64 @@ impl BiomeDefinition {
         self.dirt_depth = dirt_depth;
         self.terrain_scale = terrain_scale.max(1);
         self.detail_scale = detail_scale.max(1);
+        self.layers = vec![
+            TerrainLayer::new(self.surface, 1),
+            TerrainLayer::new(self.subsurface, dirt_depth),
+        ];
         self
+    }
+
+    pub fn relief(mut self, roughness: f32, ridge_strength: f32, ridge_scale: i32) -> Self {
+        self.roughness = roughness.max(0.0);
+        self.ridge_strength = ridge_strength.max(0.0);
+        self.ridge_scale = ridge_scale.max(1);
+        self
+    }
+
+    pub fn exposed_surface(mut self, rule: ExposedSurfaceRule) -> Self {
+        self.exposed_surface = Some(rule);
+        self
+    }
+
+    pub fn layers(mut self, layers: impl IntoIterator<Item = TerrainLayer>) -> Self {
+        self.layers = layers.into_iter().filter(|layer| layer.depth > 0).collect();
+        assert!(
+            !self.layers.is_empty(),
+            "biome requires at least one terrain layer"
+        );
+        self
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct ExposedSurfaceRule {
+    pub block: BlockId,
+    pub min_height: Option<usize>,
+    pub min_slope: usize,
+}
+
+impl ExposedSurfaceRule {
+    pub fn new(block: BlockId, min_height: Option<usize>, min_slope: usize) -> Self {
+        Self {
+            block,
+            min_height,
+            min_slope,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct TerrainLayer {
+    pub block: BlockId,
+    pub depth: usize,
+}
+
+impl TerrainLayer {
+    pub fn new(block: BlockId, depth: usize) -> Self {
+        Self {
+            block,
+            depth: depth.max(1),
+        }
     }
 }
 
@@ -259,5 +331,17 @@ mod tests {
         .with_transition_chunks(1);
 
         assert_eq!(source.influences_at(42, 64, 64).len(), 1);
+    }
+
+    #[test]
+    fn biome_accepts_custom_terrain_layers() {
+        let sand = BlockId::from(1);
+        let sandstone = BlockId::from(2);
+        let stone = BlockId::from(3);
+        let biome = BiomeDefinition::new("test:desert", sand, sandstone, stone)
+            .layers([TerrainLayer::new(sand, 4), TerrainLayer::new(sandstone, 6)]);
+
+        assert_eq!(biome.layers[0], TerrainLayer::new(sand, 4));
+        assert_eq!(biome.layers[1], TerrainLayer::new(sandstone, 6));
     }
 }

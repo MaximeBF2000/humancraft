@@ -4,7 +4,10 @@
 
 use crate::engine::registry::RegistryError;
 use crate::engine::world::generation::GenerationPipeline;
-use crate::engine::world::generation::biome::{BiomeDefinition, BiomeSource};
+use crate::engine::world::generation::bedrock::BedrockStage;
+use crate::engine::world::generation::biome::{
+    BiomeDefinition, BiomeSource, ExposedSurfaceRule, TerrainLayer,
+};
 use crate::engine::world::generation::ore::{OreDefinition, OreStage};
 use crate::engine::world::generation::terrain::TerrainStage;
 use crate::engine::world::generation::tree::{TreeDefinition, TreeStage};
@@ -31,6 +34,9 @@ pub struct BlockIds {
     pub diamond_ore: BlockId,
     pub oak_log: BlockId,
     pub oak_leaves: BlockId,
+    pub sand: BlockId,
+    pub sandstone: BlockId,
+    pub bedrock: BlockId,
 }
 
 pub fn bootstrap_content() -> Result<GameContent, RegistryError> {
@@ -71,25 +77,29 @@ pub fn bootstrap_content() -> Result<GameContent, RegistryError> {
         BlockDefinition::new("humancraft:coal_ore", "Coal Ore")
             .hardness(3.0)
             .drops(["humancraft:coal"])
-            .tags(["ore", "stone"]),
+            .tags(["ore", "stone"])
+            .textures(BlockTextures::all("humancraft:block/coal_ore/top")),
     )?;
     let iron_ore = blocks.register(
         BlockDefinition::new("humancraft:iron_ore", "Iron Ore")
             .hardness(3.0)
             .drops(["humancraft:raw_iron"])
-            .tags(["ore", "stone"]),
+            .tags(["ore", "stone"])
+            .textures(BlockTextures::all("humancraft:block/iron_ore/top")),
     )?;
     let gold_ore = blocks.register(
         BlockDefinition::new("humancraft:gold_ore", "Gold Ore")
             .hardness(3.0)
             .drops(["humancraft:raw_gold"])
-            .tags(["ore", "stone"]),
+            .tags(["ore", "stone"])
+            .textures(BlockTextures::all("humancraft:block/gold_ore/top")),
     )?;
     let diamond_ore = blocks.register(
         BlockDefinition::new("humancraft:diamond_ore", "Diamond Ore")
             .hardness(3.0)
             .drops(["humancraft:diamond"])
-            .tags(["ore", "stone"]),
+            .tags(["ore", "stone"])
+            .textures(BlockTextures::all("humancraft:block/diamond_ore/top")),
     )?;
     let oak_log = blocks.register(
         BlockDefinition::new("humancraft:oak_log", "Oak Log")
@@ -109,6 +119,27 @@ pub fn bootstrap_content() -> Result<GameContent, RegistryError> {
             .drops(["humancraft:oak_sapling"])
             .tags(["leaves", "foliage", "tree_canopy"])
             .textures(BlockTextures::all("humancraft:block/oak_leaves/top")),
+    )?;
+    let sand = blocks.register(
+        BlockDefinition::new("humancraft:sand", "Sand")
+            .hardness(0.5)
+            .drops(["humancraft:sand"])
+            .tags(["terrain", "sand"])
+            .textures(BlockTextures::all("humancraft:block/sand/top")),
+    )?;
+    let sandstone = blocks.register(
+        BlockDefinition::new("humancraft:sandstone", "Sandstone")
+            .hardness(0.8)
+            .drops(["humancraft:sandstone"])
+            .tags(["terrain", "stone", "ore_host"])
+            .textures(BlockTextures::all("humancraft:block/sandstone/top")),
+    )?;
+    let bedrock = blocks.register(
+        BlockDefinition::new("humancraft:bedrock", "Bedrock")
+            .hardness(f32::INFINITY)
+            .drops(std::iter::empty::<&str>())
+            .tags(["terrain", "stone", "unbreakable"])
+            .textures(BlockTextures::all("humancraft:block/bedrock/top")),
     )?;
 
     let mut items = ItemRegistry::new();
@@ -144,6 +175,19 @@ pub fn bootstrap_content() -> Result<GameContent, RegistryError> {
     )?;
     items
         .register(ItemDefinition::new("humancraft:oak_sapling", "Oak Sapling").tags(["sapling"]))?;
+    register_block_item(&mut items, "humancraft:sand", "Sand", "humancraft:sand")?;
+    register_block_item(
+        &mut items,
+        "humancraft:sandstone",
+        "Sandstone",
+        "humancraft:sandstone",
+    )?;
+    register_block_item(
+        &mut items,
+        "humancraft:bedrock",
+        "Bedrock",
+        "humancraft:bedrock",
+    )?;
 
     Ok(GameContent {
         blocks,
@@ -159,6 +203,9 @@ pub fn bootstrap_content() -> Result<GameContent, RegistryError> {
             diamond_ore,
             oak_log,
             oak_leaves,
+            sand,
+            sandstone,
+            bedrock,
         },
     })
 }
@@ -201,6 +248,7 @@ pub fn default_generation_pipeline(blocks: BlockIds) -> GenerationPipeline {
                 threshold: 0.996,
             },
         ]))
+        .add_stage(BedrockStage::new(blocks.bedrock))
         .add_stage(TreeStage::new(
             biome_source,
             vec![
@@ -227,16 +275,32 @@ pub fn default_generation_pipeline(blocks: BlockIds) -> GenerationPipeline {
 fn overworld_biome_source(blocks: BlockIds) -> BiomeSource {
     BiomeSource::new(vec![
         BiomeDefinition::new("humancraft:plains", blocks.grass, blocks.dirt, blocks.stone)
-            .terrain(62, 7, 4, 96, 32),
+            .terrain(66, 9, 4, 80, 24)
+            .relief(2.5, 1.5, 56),
         BiomeDefinition::new("humancraft:forest", blocks.grass, blocks.dirt, blocks.stone)
-            .terrain(64, 10, 4, 96, 32),
+            .terrain(67, 12, 4, 78, 22)
+            .relief(3.5, 2.0, 48),
         BiomeDefinition::new(
             "humancraft:mountains",
             blocks.grass,
             blocks.dirt,
             blocks.stone,
         )
-        .terrain(72, 26, 3, 128, 40),
+        .terrain(84, 44, 3, 104, 20)
+        .relief(12.0, 12.0, 52)
+        .exposed_surface(ExposedSurfaceRule::new(blocks.stone, None, 3)),
+        BiomeDefinition::new(
+            "humancraft:desert",
+            blocks.sand,
+            blocks.sandstone,
+            blocks.stone,
+        )
+        .terrain(66, 13, 4, 86, 20)
+        .relief(5.5, 5.0, 44)
+        .layers([
+            TerrainLayer::new(blocks.sand, 5),
+            TerrainLayer::new(blocks.sandstone, 6),
+        ]),
     ])
     .with_min_region_chunks(10)
     .with_transition_chunks(2)
@@ -268,6 +332,9 @@ mod tests {
         assert!(content.blocks.get_by_key("humancraft:stone").is_some());
         assert!(content.blocks.get_by_key("humancraft:oak_log").is_some());
         assert!(content.blocks.get_by_key("humancraft:oak_leaves").is_some());
+        assert!(content.blocks.get_by_key("humancraft:sand").is_some());
+        assert!(content.blocks.get_by_key("humancraft:sandstone").is_some());
+        assert!(content.blocks.get_by_key("humancraft:bedrock").is_some());
         assert!(content.items.get_by_key("humancraft:diamond").is_some());
         assert_eq!(content.block_ids.air.raw(), 0);
     }
@@ -288,7 +355,12 @@ mod tests {
         );
         assert_eq!(
             pipeline.stage_names(),
-            vec!["engine:terrain", "engine:ores", "engine:trees"]
+            vec![
+                "engine:terrain",
+                "engine:ores",
+                "engine:bedrock",
+                "engine:trees"
+            ]
         );
     }
 
@@ -307,9 +379,206 @@ mod tests {
             vec![
                 "humancraft:plains",
                 "humancraft:forest",
-                "humancraft:mountains"
+                "humancraft:mountains",
+                "humancraft:desert"
             ]
         );
+    }
+
+    #[test]
+    fn overworld_terrain_starts_at_least_at_sea_level() {
+        let content = bootstrap_content().unwrap();
+        let terrain = TerrainStage::new(overworld_biome_source(content.block_ids));
+
+        for x in -160..160 {
+            for z in -160..160 {
+                assert!(terrain.height_at(1234, x, z) >= 64);
+            }
+        }
+    }
+
+    #[test]
+    fn default_pipeline_generates_bedrock_bottom_layer() {
+        let content = bootstrap_content().unwrap();
+        let pipeline = default_generation_pipeline(content.block_ids);
+        let context = GenerationContext {
+            seed: 1234,
+            air: content.block_ids.air,
+        };
+        let chunk = pipeline.generate_chunk(ChunkPosition { x: 0, z: 0 }, &context);
+
+        for x in 0..crate::engine::world::CHUNK_SIZE {
+            for z in 0..crate::engine::world::CHUNK_SIZE {
+                assert_eq!(
+                    chunk.block(BlockPosition { x, y: 0, z }),
+                    Some(content.block_ids.bedrock)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn desert_biome_uses_sand_then_sandstone_then_stone() {
+        let content = bootstrap_content().unwrap();
+        let desert = BiomeDefinition::new(
+            "test:desert",
+            content.block_ids.sand,
+            content.block_ids.sandstone,
+            content.block_ids.stone,
+        )
+        .terrain(64, 1, 4, 96, 32)
+        .layers([
+            TerrainLayer::new(content.block_ids.sand, 5),
+            TerrainLayer::new(content.block_ids.sandstone, 6),
+        ]);
+        let terrain = TerrainStage::new(BiomeSource::new(vec![desert]));
+        let context = GenerationContext {
+            seed: 1234,
+            air: content.block_ids.air,
+        };
+        let chunk = GenerationPipeline::new()
+            .add_stage(terrain.clone())
+            .generate_chunk(ChunkPosition { x: 0, z: 0 }, &context);
+        let surface_y = terrain.height_at(context.seed, 0, 0);
+
+        assert_eq!(
+            chunk.block(BlockPosition {
+                x: 0,
+                y: surface_y,
+                z: 0
+            }),
+            Some(content.block_ids.sand)
+        );
+        assert_eq!(
+            chunk.block(BlockPosition {
+                x: 0,
+                y: surface_y - 5,
+                z: 0
+            }),
+            Some(content.block_ids.sandstone)
+        );
+        assert_eq!(
+            chunk.block(BlockPosition {
+                x: 0,
+                y: surface_y - 11,
+                z: 0
+            }),
+            Some(content.block_ids.stone)
+        );
+    }
+
+    #[test]
+    fn biome_profiles_have_meaningful_height_variation() {
+        let content = bootstrap_content().unwrap();
+        let source = overworld_biome_source(content.block_ids);
+        let terrain = TerrainStage::new(source.clone());
+
+        for biome in source.biomes() {
+            let mut min_height = usize::MAX;
+            let mut max_height = 0;
+            for x in (0..256).step_by(4) {
+                for z in (0..256).step_by(4) {
+                    let height = terrain.height_for_biome(1234, x, z, biome);
+                    min_height = min_height.min(height);
+                    max_height = max_height.max(height);
+                }
+            }
+
+            let expected_variation = if biome.key == "humancraft:mountains" {
+                24
+            } else {
+                8
+            };
+            assert!(
+                max_height - min_height >= expected_variation,
+                "{} variation was only {}",
+                biome.key,
+                max_height - min_height
+            );
+        }
+    }
+
+    #[test]
+    fn mountain_profile_exposes_stone_surfaces() {
+        let content = bootstrap_content().unwrap();
+        let mountain = BiomeDefinition::new(
+            "test:mountains",
+            content.block_ids.grass,
+            content.block_ids.dirt,
+            content.block_ids.stone,
+        )
+        .terrain(84, 44, 3, 104, 20)
+        .relief(12.0, 12.0, 52)
+        .exposed_surface(ExposedSurfaceRule::new(content.block_ids.stone, None, 3));
+        let terrain = TerrainStage::new(BiomeSource::new(vec![mountain]));
+        let context = GenerationContext {
+            seed: 1234,
+            air: content.block_ids.air,
+        };
+        let mut exposed_stone = 0;
+
+        for chunk_x in 0..3 {
+            for chunk_z in 0..3 {
+                let chunk_position = ChunkPosition {
+                    x: chunk_x,
+                    z: chunk_z,
+                };
+                let chunk = GenerationPipeline::new()
+                    .add_stage(terrain.clone())
+                    .generate_chunk(chunk_position, &context);
+                for x in 0..crate::engine::world::CHUNK_SIZE {
+                    for z in 0..crate::engine::world::CHUNK_SIZE {
+                        let world_x = chunk_x * crate::engine::world::CHUNK_SIZE as i32 + x as i32;
+                        let world_z = chunk_z * crate::engine::world::CHUNK_SIZE as i32 + z as i32;
+                        let surface_y = terrain.height_at(context.seed, world_x, world_z);
+                        if chunk.block(BlockPosition { x, y: surface_y, z })
+                            == Some(content.block_ids.stone)
+                        {
+                            exposed_stone += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        assert!(exposed_stone > 0);
+    }
+
+    #[test]
+    fn mountain_profile_keeps_some_high_grassy_tops() {
+        let content = bootstrap_content().unwrap();
+        let mountain = BiomeDefinition::new(
+            "test:mountains",
+            content.block_ids.grass,
+            content.block_ids.dirt,
+            content.block_ids.stone,
+        )
+        .terrain(84, 44, 3, 104, 20)
+        .relief(12.0, 12.0, 52)
+        .exposed_surface(ExposedSurfaceRule::new(content.block_ids.stone, None, 3));
+        let terrain = TerrainStage::new(BiomeSource::new(vec![mountain]));
+        let context = GenerationContext {
+            seed: 1234,
+            air: content.block_ids.air,
+        };
+        let chunk = GenerationPipeline::new()
+            .add_stage(terrain.clone())
+            .generate_chunk(ChunkPosition { x: 0, z: 0 }, &context);
+        let mut high_grass = 0;
+
+        for x in 0..crate::engine::world::CHUNK_SIZE {
+            for z in 0..crate::engine::world::CHUNK_SIZE {
+                let surface_y = terrain.height_at(context.seed, x as i32, z as i32);
+                if surface_y >= 96
+                    && chunk.block(BlockPosition { x, y: surface_y, z })
+                        == Some(content.block_ids.grass)
+                {
+                    high_grass += 1;
+                }
+            }
+        }
+
+        assert!(high_grass > 0);
     }
 
     #[test]
@@ -324,11 +593,11 @@ mod tests {
                 let south = terrain.height_at(1234, x, z + 1);
 
                 assert!(
-                    height.abs_diff(east) <= 3,
+                    height.abs_diff(east) <= 6,
                     "east height jumped from {height} to {east} at {x},{z}"
                 );
                 assert!(
-                    height.abs_diff(south) <= 3,
+                    height.abs_diff(south) <= 6,
                     "south height jumped from {height} to {south} at {x},{z}"
                 );
             }

@@ -10,14 +10,27 @@ generation.
 - `TerrainStage`: fills terrain columns from biome terrain profiles using
   deterministic value noise.
 - `OreStage`: places arbitrary ore definitions inside matching host blocks.
+- `BedrockStage`: guarantees the bottom chunk layer is an unbroken bedrock
+  layer.
 - `TreeStage`: places arbitrary tree definitions in allowed biomes after base
   terrain and ores are generated.
 
 ## Biomes
 
 - `BiomeSource`: deterministic biome lookup from seed and world coordinates.
-- `BiomeDefinition`: data for one biome's terrain surface, subsurface, stone
-  host block, height range, soil depth, and terrain noise scale.
+- `BiomeDefinition`: data for one biome's terrain layer stack, fallback stone
+  block, height range, terrain noise scale, relief controls, ridge controls,
+  and optional exposed-surface rules.
+- Terrain layer stacks are read from the surface downward. Plains and forest
+  use grass then dirt then stone. Desert uses sand, then sandstone, then stone.
+- Current HumanCraft terrain is configured so sampled overworld surfaces start
+  at Y 64 or higher; mountains are substantially higher.
+- Biomes can add secondary roughness and ridge noise on top of base height
+  variation. Mountains use stronger relief and ridge settings, deserts use
+  dune-like relief, and plains/forests use gentler rolling relief.
+- Mountains expose stone on steep surfaces. High flatter mountaintops remain
+  grassy, so stone reads as cliff/rough-slope material rather than replacing
+  every mountain top.
 - Biome regions are macro-cells measured in chunks. The current overworld uses
   10-chunk regions with a 2-chunk transition band.
 - Inside the core of a biome region, one biome owns terrain and decorations.
@@ -27,6 +40,7 @@ generation.
   - `humancraft:plains`
   - `humancraft:forest`
   - `humancraft:mountains`
+  - `humancraft:desert`
 
 ## Terrain Continuity
 
@@ -36,6 +50,8 @@ generation.
   chunks use the same continuous world-coordinate height function.
 - Tests enforce that heights stay continuous across chunk borders for the
   current terrain generator.
+- Tests also enforce minimum biome height variation and exposed mountain stone
+  surfaces for the current HumanCraft content.
 
 ## Responsibilities
 
@@ -43,7 +59,8 @@ generation.
 - Apply stages in configured order.
 - Keep stage behavior generic.
 - Let content supply block IDs, biome profiles, ore distribution definitions,
-  and tree definitions.
+  bedrock block, and tree definitions.
+- Guarantee the bottom Y layer is bedrock after terrain and ores have run.
 - Generate chunks deterministically from world seed and chunk position so client
   systems can request new terrain as the player moves.
 

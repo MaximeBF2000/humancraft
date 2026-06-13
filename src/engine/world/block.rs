@@ -85,6 +85,10 @@ impl BlockDefinition {
         self.textures = textures;
         self
     }
+
+    pub fn has_tag(&self, tag: &str) -> bool {
+        self.tags.iter().any(|candidate| candidate == tag)
+    }
 }
 
 impl Definition for BlockDefinition {

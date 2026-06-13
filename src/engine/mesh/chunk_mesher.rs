@@ -182,12 +182,12 @@ fn face_vertices(position: BlockPosition, direction: FaceDirection) -> [[f32; 3]
     let z1 = z + 1.0;
 
     match direction {
-        FaceDirection::North => [[x, y, z], [x1, y, z], [x1, y1, z], [x, y1, z]],
-        FaceDirection::South => [[x1, y, z1], [x, y, z1], [x, y1, z1], [x1, y1, z1]],
-        FaceDirection::East => [[x1, y, z], [x1, y, z1], [x1, y1, z1], [x1, y1, z]],
-        FaceDirection::West => [[x, y, z1], [x, y, z], [x, y1, z], [x, y1, z1]],
-        FaceDirection::Up => [[x, y1, z], [x1, y1, z], [x1, y1, z1], [x, y1, z1]],
-        FaceDirection::Down => [[x, y, z1], [x1, y, z1], [x1, y, z], [x, y, z]],
+        FaceDirection::North => [[x1, y, z], [x, y, z], [x, y1, z], [x1, y1, z]],
+        FaceDirection::South => [[x, y, z1], [x1, y, z1], [x1, y1, z1], [x, y1, z1]],
+        FaceDirection::East => [[x1, y, z1], [x1, y, z], [x1, y1, z], [x1, y1, z1]],
+        FaceDirection::West => [[x, y, z], [x, y, z1], [x, y1, z1], [x, y1, z]],
+        FaceDirection::Up => [[x, y1, z1], [x1, y1, z1], [x1, y1, z], [x, y1, z]],
+        FaceDirection::Down => [[x, y, z], [x1, y, z], [x1, y, z1], [x, y, z1]],
     }
 }
 
@@ -229,6 +229,29 @@ mod tests {
     }
 
     #[test]
+    fn face_vertices_are_counter_clockwise_from_outside() {
+        let position = BlockPosition { x: 1, y: 2, z: 3 };
+        let cases = [
+            (FaceDirection::North, [0.0, 0.0, -1.0]),
+            (FaceDirection::South, [0.0, 0.0, 1.0]),
+            (FaceDirection::East, [1.0, 0.0, 0.0]),
+            (FaceDirection::West, [-1.0, 0.0, 0.0]),
+            (FaceDirection::Up, [0.0, 1.0, 0.0]),
+            (FaceDirection::Down, [0.0, -1.0, 0.0]),
+        ];
+
+        for (direction, expected_normal) in cases {
+            let vertices = face_vertices(position, direction);
+            let normal = triangle_normal(vertices[0], vertices[1], vertices[2]);
+
+            assert_eq!(
+                normal, expected_normal,
+                "{direction:?} face winding changed"
+            );
+        }
+    }
+
+    #[test]
     fn outside_opaque_neighbor_hides_chunk_border_face() {
         let content = bootstrap_content().unwrap();
         let mut chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, content.block_ids.air);
@@ -255,5 +278,16 @@ mod tests {
                 .iter()
                 .any(|quad| quad.direction == FaceDirection::East)
         );
+    }
+
+    fn triangle_normal(a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> [f32; 3] {
+        let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+
+        [
+            ab[1] * ac[2] - ab[2] * ac[1],
+            ab[2] * ac[0] - ab[0] * ac[2],
+            ab[0] * ac[1] - ab[1] * ac[0],
+        ]
     }
 }

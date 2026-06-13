@@ -44,8 +44,6 @@ Last updated: 2026-06-13
   physical key positions, so AZERTY `ZQSD` works as intended.
 - Changed the first windowed render from a single exposed chunk to a centered
   `5 x 5` terrain patch.
-- Hid deep underground side faces in the temporary preview renderer so the
-  initial view reads as terrain rather than a vertical cutaway column.
 - Hid outer render-patch boundary side faces so the finite terrain patch does
   not show as a sliced chunk wall.
 - Switched the camera projection to wgpu's expected depth range.
@@ -163,6 +161,63 @@ Last updated: 2026-06-13
 - Added regression coverage for interpolated noise, biome-region sizing,
   transition width, biome influence normalization, biome region cores, and
   chunk-border terrain continuity.
+- Regenerated oak log and oak leaves textures to better match the intended
+  Minecraft-style references:
+  - oak logs now have ringed end caps and vertical bark strips
+  - oak leaves now use cut-out alpha with transparent holes
+- Added alpha discard in the textured terrain shader so transparent leaf pixels
+  render as holes.
+- Expanded camera pitch to allow looking almost fully up and down while
+  avoiding the exact vertical singularity.
+- Rebuilt the center crosshair with aspect-ratio compensation so horizontal and
+  vertical bars appear the same length on widescreen displays.
+- Made selected-block outlines brighter, slightly larger, and depth-independent
+  so the raycast target is easier to read.
+- Added regression coverage for camera pitch range, crosshair aspect
+  compensation, and oak leaf cut-out alpha.
+- Made oak leaves more transparent by increasing cut-out pixels in the leaf
+  textures.
+- Added desert biome support through biome-owned terrain layer stacks.
+- Added sand, sandstone, and bedrock blocks and matching block items.
+- Generated sand, sandstone, bedrock, and more transparent oak leaves textures
+  with the `create-block-texture` skill.
+- Added the `BedrockStage` to guarantee every generated chunk has bedrock at
+  Y 0.
+- Marked bedrock with an `unbreakable` tag and made windowed block breaking and
+  terminal playtest mining respect that tag.
+- Raised the default overworld terrain profiles so sampled surfaces start at
+  Y 64 or higher, with mountains substantially higher.
+- Added tests for custom biome terrain layers, desert sand/sandstone/stone
+  strata, bedrock bottom layers, unbreakable block behavior, sea-level minimum
+  terrain, and new block texture loading.
+- Added biome terrain relief controls:
+  - secondary roughness noise
+  - ridge-style height contribution
+  - per-biome roughness/ridge tuning
+- Tuned plains, forest, desert, and mountains for stronger height variation.
+- Added exposed-surface rules and configured mountains to expose stone on steep
+  surfaces while keeping high flatter tops grassy.
+- Added regression coverage for biome height variation and exposed mountain
+  stone.
+- Fixed underground rendering artifacts after digging below terrain:
+  - terrain mesh quads now use outward counter-clockwise winding
+  - terrain renders with `FrontFace::Ccw` and back-face culling
+  - the temporary finite-world preview filter hides loaded-patch bottom
+    boundary faces
+  - real underground side and ceiling faces remain visible after block edits
+- Reduced chunk-load frame drops by generating at most two new runtime chunks
+  per frame and removing the duplicate pre-movement chunk ensure pass.
+- Further reduced runtime chunk-load spikes by queuing dirty chunk remeshes and
+  rebuilding/uploading at most three chunk meshes per frame.
+- Generated and registered coal, iron, gold, and diamond ore textures so ore
+  blocks no longer fall back to unicolor missing-texture faces.
+- Added a broad texture coverage test requiring every registered non-air block
+  to use loadable texture assets.
+- Changed player-facing placement so a block cannot be placed inside the
+  player's entity AABB, including both leg and head space.
+- Added regression coverage for underground preview filtering, loaded-world
+  bottom boundary filtering, chunk-load budgeting, player-occupied placement,
+  texture coverage, and high grassy mountain tops.
 
 ## Verified
 
@@ -204,6 +259,42 @@ Last updated: 2026-06-13
 - `cargo fmt` after smoothing terrain and biome transitions.
 - `cargo test` after smoothing terrain and biome transitions.
 - `cargo run -- preview` after smoothing terrain and biome transitions.
+- Regenerated oak log and oak leaves textures with the `create-block-texture`
+  skill.
+- Verified oak log and oak leaves texture PNGs are `16 x 16` RGBA images after
+  regeneration.
+- `cargo fmt` after texture, camera, crosshair, and outline fixes.
+- `cargo test` after texture, camera, crosshair, and outline fixes.
+- Regenerated sand, sandstone, bedrock, and oak leaves textures with the
+  `create-block-texture` skill.
+- Verified oak leaves, sand, sandstone, and bedrock texture PNGs are `16 x 16`
+  RGBA images.
+- `cargo fmt` after desert, bedrock, sea-level, and leaf transparency changes.
+- `cargo test` after desert, bedrock, sea-level, and leaf transparency changes.
+- `cargo fmt` after terrain relief and mountain stone exposure tuning.
+- `cargo test` after terrain relief and mountain stone exposure tuning.
+- `cargo run -- preview` after terrain relief and mountain stone exposure
+  tuning.
+- `cargo fmt` after mountain surface and underground render filtering fixes.
+- `cargo test` after mountain surface and underground render filtering fixes.
+- `cargo run -- preview` after mountain surface and underground render
+  filtering fixes.
+- `cargo run` launched successfully after terrain back-face culling changes and
+  was stopped with Ctrl-C after startup validation.
+- `cargo fmt` after mesh winding and runtime chunk-load throttling fixes.
+- `cargo test` after mesh winding and runtime chunk-load throttling fixes.
+- `cargo run -- preview` after mesh winding and runtime chunk-load throttling
+  fixes.
+- `cargo run` launched successfully after mesh winding and runtime chunk-load
+  throttling fixes and was stopped with Ctrl-C after startup validation.
+- Generated coal ore, iron ore, gold ore, and diamond ore textures with the
+  `create-block-texture` skill.
+- `cargo fmt` after remesh throttling, texture coverage, and placement fixes.
+- `cargo test` after remesh throttling, texture coverage, and placement fixes.
+- `cargo run -- preview` after remesh throttling, texture coverage, and
+  placement fixes.
+- `cargo run` launched successfully after remesh throttling, texture coverage,
+  and placement fixes and was stopped with Ctrl-C after startup validation.
 
 ## Next Concrete Steps
 
@@ -228,9 +319,9 @@ Last updated: 2026-06-13
   `--name humancraft`.
 - Cargo VCS initialization was disabled because the sandbox would not allow
   creating `.git`.
-- Rendering now samples PNG textures for grass, dirt, and stone in windowed
-  mode. Ore blocks still use the fallback color path until ore textures are
-  generated and registered.
+- Rendering now samples PNG textures for registered non-air blocks in windowed
+  mode. A test enforces that gameplay blocks do not silently use the missing
+  texture fallback.
 - The current atlas is intentionally simple: all block faces are expected to be
   16 x 16 RGBA PNGs.
 - Tree origins are currently kept inside chunk margins so generated trees are

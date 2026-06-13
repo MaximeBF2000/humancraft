@@ -60,6 +60,9 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let texel = textureSample(block_texture, block_sampler, input.tex_coords);
+    if texel.a < 0.1 {
+        discard;
+    }
     return vec4<f32>(texel.rgb * input.color, texel.a);
 }
 "#;
@@ -123,6 +126,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 "#;
 
 const CLIENT_RENDER_DISTANCE_CHUNKS: i32 = 2;
+const MAX_CHUNK_LOADS_PER_FRAME: usize = 2;
+const MAX_CHUNK_REMESHES_PER_FRAME: usize = 3;
 const CHUNK_WORLD_SIZE: f32 = 16.0;
 const PLAYER_HEIGHT: f32 = 1.8;
 const PLAYER_EYE_HEIGHT: f32 = 1.62;
@@ -237,6 +242,7 @@ struct RenderState {
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     chunk_buffers: HashMap<ChunkPosition, ChunkRenderBuffer>,
+    pending_chunk_remeshes: HashSet<ChunkPosition>,
     menu_vertex_buffer: wgpu::Buffer,
     menu_index_buffer: wgpu::Buffer,
     menu_index_count: u32,
@@ -320,7 +326,8 @@ impl RenderState {
             CLIENT_RENDER_DISTANCE_CHUNKS,
         );
         let preferred_spawn = Vec3::new(0.0, 0.0, 20.0);
-        let generated_chunks = world.ensure_chunks_around_render_position(preferred_spawn);
+        let generated_chunks =
+            world.ensure_chunks_around_render_position(preferred_spawn, usize::MAX);
         let texture_atlas = TextureAtlas::load(&device, &queue, &content.blocks);
 
         let camera = Camera::new(world.safe_spawn_eye_position(preferred_spawn));
@@ -441,7 +448,7 @@ impl RenderState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
+                cull_mode: Some(wgpu::Face::Back),
                 polygon_mode: wgpu::PolygonMode::Fill,
                 unclipped_depth: false,
                 conservative: false,
@@ -519,7 +526,7 @@ impl RenderState {
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: Texture::DEPTH_FORMAT,
                 depth_write_enabled: false,
-                depth_compare: wgpu::CompareFunction::LessEqual,
+                depth_compare: wgpu::CompareFunction::Always,
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
@@ -540,12 +547,13 @@ impl RenderState {
             contents: bytemuck::cast_slice(&menu_indices),
             usage: wgpu::BufferUsages::INDEX,
         });
-        let (crosshair_vertices, crosshair_indices) = build_crosshair_mesh();
+        let (crosshair_vertices, crosshair_indices) =
+            build_crosshair_mesh(config.width, config.height);
         let crosshair_vertex_buffer =
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Crosshair Vertex Buffer"),
                 contents: bytemuck::cast_slice(&crosshair_vertices),
-                usage: wgpu::BufferUsages::VERTEX,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             });
         let crosshair_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Crosshair Index Buffer"),
@@ -576,6 +584,7 @@ impl RenderState {
             camera_buffer,
             camera_bind_group,
             chunk_buffers,
+            pending_chunk_remeshes: HashSet::new(),
             menu_vertex_buffer,
             menu_index_buffer,
             menu_index_count: menu_indices.len() as u32,
@@ -604,6 +613,7 @@ impl RenderState {
         self.config.height = size.height;
         self.surface.configure(&self.device, &self.config);
         self.depth_texture = Texture::create_depth_texture(&self.device, &self.config);
+        self.update_crosshair_mesh();
     }
 
     fn handle_key(&mut self, event: &KeyEvent) -> bool {
@@ -640,9 +650,11 @@ impl RenderState {
 
         let dirty_chunks = match button {
             MouseButton::Left => self.world.break_block(hit.block),
-            MouseButton::Right => self
-                .world
-                .place_block(hit.previous, self.world.block_ids.dirt),
+            MouseButton::Right => self.world.place_block_for_player(
+                hit.previous,
+                self.world.block_ids.dirt,
+                self.camera.position,
+            ),
             _ => Vec::new(),
         };
 
@@ -670,18 +682,18 @@ impl RenderState {
         self.last_frame = now;
         let mut dirty_chunks = Vec::new();
         if !self.paused {
-            dirty_chunks.extend(
-                self.world
-                    .ensure_chunks_around_render_position(self.camera.position),
-            );
             self.camera.update(&self.input, &self.world, delta_seconds);
-            dirty_chunks.extend(
-                self.world
-                    .ensure_chunks_around_render_position(self.camera.position),
-            );
+            dirty_chunks.extend(self.world.ensure_chunks_around_render_position(
+                self.camera.position,
+                MAX_CHUNK_LOADS_PER_FRAME,
+            ));
         }
         if !dirty_chunks.is_empty() {
-            self.rebuild_chunk_meshes(&dirty_chunks);
+            self.queue_chunk_remeshes(&dirty_chunks);
+        }
+        let remesh_chunks = self.take_pending_chunk_remeshes(MAX_CHUNK_REMESHES_PER_FRAME);
+        if !remesh_chunks.is_empty() {
+            self.rebuild_chunk_meshes(&remesh_chunks);
         }
         self.update_target_outline();
         let uniform = CameraUniform::new(
@@ -789,6 +801,29 @@ impl RenderState {
         }
     }
 
+    fn queue_chunk_remeshes(&mut self, dirty_chunks: &[ChunkPosition]) {
+        for chunk_position in unique_loaded_chunk_positions(dirty_chunks, &self.world) {
+            self.pending_chunk_remeshes.insert(chunk_position);
+        }
+    }
+
+    fn take_pending_chunk_remeshes(&mut self, limit: usize) -> Vec<ChunkPosition> {
+        let mut chunks: Vec<_> = self.pending_chunk_remeshes.iter().copied().collect();
+        chunks.sort_by_key(|chunk| {
+            let camera_chunk = chunk_position_for_render_position(self.camera.position);
+            let dx = (chunk.x - camera_chunk.x).abs();
+            let dz = (chunk.z - camera_chunk.z).abs();
+            (dx.max(dz), dx + dz, chunk.z, chunk.x)
+        });
+        chunks.truncate(limit);
+
+        for chunk in &chunks {
+            self.pending_chunk_remeshes.remove(chunk);
+        }
+
+        chunks
+    }
+
     fn update_target_outline(&mut self) {
         self.targeted_block = if self.paused {
             None
@@ -809,6 +844,15 @@ impl RenderState {
         } else {
             self.outline_vertex_count = 0;
         }
+    }
+
+    fn update_crosshair_mesh(&self) {
+        let (vertices, _) = build_crosshair_mesh(self.config.width, self.config.height);
+        self.queue.write_buffer(
+            &self.crosshair_vertex_buffer,
+            0,
+            bytemuck::cast_slice(&vertices),
+        );
     }
 }
 
@@ -983,7 +1027,7 @@ impl Camera {
     fn apply_mouse_delta(&mut self, delta_x: f32, delta_y: f32) {
         let sensitivity = 0.0025;
         self.yaw += delta_x * sensitivity;
-        self.pitch = (self.pitch - delta_y * sensitivity).clamp(-1.35, 1.20);
+        self.pitch = (self.pitch - delta_y * sensitivity).clamp(-1.553, 1.553);
     }
 
     fn view_projection(&self, width: u32, height: u32) -> Mat4 {
@@ -1093,9 +1137,14 @@ impl ClientWorld {
         self.chunks.insert(chunk.position(), chunk);
     }
 
-    fn ensure_chunks_around_render_position(&mut self, position: Vec3) -> Vec<ChunkPosition> {
+    fn ensure_chunks_around_render_position(
+        &mut self,
+        position: Vec3,
+        max_new_chunks: usize,
+    ) -> Vec<ChunkPosition> {
         let center = chunk_position_for_render_position(position);
         let mut dirty_chunks = HashSet::new();
+        let mut missing_chunks = Vec::new();
 
         for z in center.z - self.render_distance_chunks..=center.z + self.render_distance_chunks {
             for x in center.x - self.render_distance_chunks..=center.x + self.render_distance_chunks
@@ -1104,13 +1153,22 @@ impl ClientWorld {
                 if self.chunks.contains_key(&chunk_position) {
                     continue;
                 }
-
-                let chunk = self
-                    .generation_pipeline
-                    .generate_chunk(chunk_position, &self.generation_context);
-                self.insert_chunk(chunk);
-                self.mark_chunk_and_horizontal_neighbors_dirty(chunk_position, &mut dirty_chunks);
+                missing_chunks.push(chunk_position);
             }
+        }
+
+        missing_chunks.sort_by_key(|chunk| {
+            let dx = (chunk.x - center.x).abs();
+            let dz = (chunk.z - center.z).abs();
+            (dx.max(dz), dx + dz, chunk.z, chunk.x)
+        });
+
+        for chunk_position in missing_chunks.into_iter().take(max_new_chunks) {
+            let chunk = self
+                .generation_pipeline
+                .generate_chunk(chunk_position, &self.generation_context);
+            self.insert_chunk(chunk);
+            self.mark_chunk_and_horizontal_neighbors_dirty(chunk_position, &mut dirty_chunks);
         }
 
         dirty_chunks.into_iter().collect()
@@ -1200,17 +1258,36 @@ impl ClientWorld {
     }
 
     fn collides_player_at(&self, eye_position: Vec3) -> bool {
-        let min = Vec3::new(
-            eye_position.x - PLAYER_RADIUS,
-            eye_position.y - PLAYER_EYE_HEIGHT,
-            eye_position.z - PLAYER_RADIUS,
-        );
-        let max = Vec3::new(
-            eye_position.x + PLAYER_RADIUS,
-            eye_position.y - PLAYER_EYE_HEIGHT + PLAYER_HEIGHT,
-            eye_position.z + PLAYER_RADIUS,
-        );
+        let (min, max) = player_aabb(eye_position);
         self.collides_aabb(min, max)
+    }
+
+    fn block_intersects_player(
+        &self,
+        position: WorldBlockPosition,
+        player_eye_position: Vec3,
+    ) -> bool {
+        let block_min = Vec3::new(
+            position.x as f32 - 8.0,
+            position.y as f32 - 64.0,
+            position.z as f32 - 8.0,
+        );
+        let block_max = block_min + Vec3::splat(1.0);
+        let (player_min, player_max) = player_aabb(player_eye_position);
+
+        aabb_intersects(block_min, block_max, player_min, player_max)
+    }
+
+    fn place_block_for_player(
+        &mut self,
+        position: WorldBlockPosition,
+        block: BlockId,
+        player_eye_position: Vec3,
+    ) -> Vec<ChunkPosition> {
+        if self.block_intersects_player(position, player_eye_position) {
+            return Vec::new();
+        }
+        self.place_block(position, block)
     }
 
     fn collides_aabb(&self, min: Vec3, max: Vec3) -> bool {
@@ -1272,6 +1349,9 @@ impl ClientWorld {
     }
 
     fn break_block(&mut self, position: WorldBlockPosition) -> Vec<ChunkPosition> {
+        if self.is_unbreakable(position) {
+            return Vec::new();
+        }
         self.set_block(position, self.block_ids.air)
     }
 
@@ -1286,6 +1366,13 @@ impl ClientWorld {
         self.block(position)
             .and_then(|block| self.blocks.get(block))
             .map(|definition| definition.solid)
+            .unwrap_or(false)
+    }
+
+    fn is_unbreakable(&self, position: WorldBlockPosition) -> bool {
+        self.block(position)
+            .and_then(|block| self.blocks.get(block))
+            .map(|definition| definition.has_tag("unbreakable"))
             .unwrap_or(false)
     }
 
@@ -1408,6 +1495,30 @@ fn render_y_to_block_world(render_y: f32) -> f32 {
 
 fn render_z_to_block_world(render_z: f32) -> f32 {
     render_z + 8.0
+}
+
+fn player_aabb(eye_position: Vec3) -> (Vec3, Vec3) {
+    (
+        Vec3::new(
+            eye_position.x - PLAYER_RADIUS,
+            eye_position.y - PLAYER_EYE_HEIGHT,
+            eye_position.z - PLAYER_RADIUS,
+        ),
+        Vec3::new(
+            eye_position.x + PLAYER_RADIUS,
+            eye_position.y - PLAYER_EYE_HEIGHT + PLAYER_HEIGHT,
+            eye_position.z + PLAYER_RADIUS,
+        ),
+    )
+}
+
+fn aabb_intersects(left_min: Vec3, left_max: Vec3, right_min: Vec3, right_max: Vec3) -> bool {
+    left_min.x < right_max.x
+        && left_max.x > right_min.x
+        && left_min.y < right_max.y
+        && left_max.y > right_min.y
+        && left_min.z < right_max.z
+        && left_max.z > right_min.z
 }
 
 fn split_world_block_position(
@@ -1784,21 +1895,11 @@ fn should_render_preview_quad(
     chunk_position: ChunkPosition,
     render_bounds: Option<RenderChunkBounds>,
 ) -> bool {
-    use crate::engine::mesh::chunk_mesher::FaceDirection;
-
-    match quad.direction {
-        FaceDirection::Up | FaceDirection::Down => true,
-        FaceDirection::North | FaceDirection::South | FaceDirection::East | FaceDirection::West => {
-            if is_outer_render_boundary(quad, chunk_position, render_bounds) {
-                return false;
-            }
-            quad.vertices
-                .iter()
-                .map(|vertex| vertex[1])
-                .fold(f32::MIN, f32::max)
-                >= 60.0
-        }
+    if is_outer_render_boundary(quad, chunk_position, render_bounds) {
+        return false;
     }
+
+    true
 }
 
 fn is_outer_render_boundary(
@@ -1835,7 +1936,11 @@ fn is_outer_render_boundary(
             .vertices
             .iter()
             .all(|vertex| nearly_equal(vertex[2] + offset_z, render_max_world_z)),
-        FaceDirection::Up | FaceDirection::Down => false,
+        FaceDirection::Up => false,
+        FaceDirection::Down => quad
+            .vertices
+            .iter()
+            .all(|vertex| nearly_equal(vertex[1], 0.0)),
     }
 }
 
@@ -1902,48 +2007,50 @@ fn build_menu_mesh() -> (Vec<Vertex>, Vec<u32>) {
     (vertices, indices)
 }
 
-fn build_crosshair_mesh() -> (Vec<Vertex>, Vec<u32>) {
-    let color = [0.02, 0.02, 0.02];
-    let thickness = 0.003;
-    let length = 0.035;
+fn build_crosshair_mesh(width: u32, height: u32) -> (Vec<Vertex>, Vec<u32>) {
+    let color = [0.96, 0.96, 0.96];
+    let aspect = width.max(1) as f32 / height.max(1) as f32;
+    let thickness = 0.0035;
+    let vertical_length = 0.032;
+    let horizontal_length = vertical_length / aspect;
     let vertices = vec![
         Vertex {
-            position: [-length, -thickness, 0.0],
+            position: [-horizontal_length, -thickness, 0.0],
             color,
             tex_coords: [0.0, 0.0],
         },
         Vertex {
-            position: [length, -thickness, 0.0],
+            position: [horizontal_length, -thickness, 0.0],
             color,
             tex_coords: [0.0, 0.0],
         },
         Vertex {
-            position: [length, thickness, 0.0],
+            position: [horizontal_length, thickness, 0.0],
             color,
             tex_coords: [0.0, 0.0],
         },
         Vertex {
-            position: [-length, thickness, 0.0],
+            position: [-horizontal_length, thickness, 0.0],
             color,
             tex_coords: [0.0, 0.0],
         },
         Vertex {
-            position: [-thickness, -length, 0.0],
+            position: [-thickness, -vertical_length, 0.0],
             color,
             tex_coords: [0.0, 0.0],
         },
         Vertex {
-            position: [thickness, -length, 0.0],
+            position: [thickness, -vertical_length, 0.0],
             color,
             tex_coords: [0.0, 0.0],
         },
         Vertex {
-            position: [thickness, length, 0.0],
+            position: [thickness, vertical_length, 0.0],
             color,
             tex_coords: [0.0, 0.0],
         },
         Vertex {
-            position: [-thickness, length, 0.0],
+            position: [-thickness, vertical_length, 0.0],
             color,
             tex_coords: [0.0, 0.0],
         },
@@ -1953,13 +2060,13 @@ fn build_crosshair_mesh() -> (Vec<Vertex>, Vec<u32>) {
 }
 
 fn build_outline_vertices(block: WorldBlockPosition) -> Vec<Vertex> {
-    let color = [0.01, 0.01, 0.01];
+    let color = [1.0, 0.92, 0.18];
     let min = Vec3::new(
-        block.x as f32 - 8.0 - 0.01,
-        block.y as f32 - 64.0 - 0.01,
-        block.z as f32 - 8.0 - 0.01,
+        block.x as f32 - 8.0 - 0.025,
+        block.y as f32 - 64.0 - 0.025,
+        block.z as f32 - 8.0 - 0.025,
     );
-    let max = min + Vec3::splat(1.02);
+    let max = min + Vec3::splat(1.05);
     let corners = [
         [min.x, min.y, min.z],
         [max.x, min.y, min.z],
@@ -2016,6 +2123,11 @@ fn block_color(block: BlockId, blocks: &BlockRegistry) -> [f32; 3] {
         "humancraft:iron_ore" => [0.70, 0.42, 0.28],
         "humancraft:gold_ore" => [0.95, 0.72, 0.18],
         "humancraft:diamond_ore" => [0.20, 0.80, 0.90],
+        "humancraft:oak_log" => [0.45, 0.28, 0.12],
+        "humancraft:oak_leaves" => [0.18, 0.42, 0.14],
+        "humancraft:sand" => [0.86, 0.78, 0.52],
+        "humancraft:sandstone" => [0.72, 0.65, 0.43],
+        "humancraft:bedrock" => [0.20, 0.20, 0.22],
         _ => [0.8, 0.8, 0.8],
     }
 }
@@ -2182,7 +2294,7 @@ mod tests {
     }
 
     #[test]
-    fn preview_filter_hides_deep_chunk_wall_faces() {
+    fn preview_filter_keeps_real_underground_faces_visible() {
         let content = bootstrap_content().unwrap();
         let wall = MeshQuad {
             block: content.block_ids.stone,
@@ -2211,8 +2323,17 @@ mod tests {
             direction: FaceDirection::Down,
             ..wall.clone()
         };
+        let world_bottom = MeshQuad {
+            vertices: [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [1.0, 0.0, 1.0],
+                [0.0, 0.0, 1.0],
+            ],
+            ..bottom.clone()
+        };
 
-        assert!(!should_render_preview_quad(
+        assert!(should_render_preview_quad(
             &wall,
             ChunkPosition { x: 0, z: 0 },
             None
@@ -2229,6 +2350,11 @@ mod tests {
         ));
         assert!(should_render_preview_quad(
             &bottom,
+            ChunkPosition { x: 0, z: 0 },
+            None
+        ));
+        assert!(should_render_preview_quad(
+            &world_bottom,
             ChunkPosition { x: 0, z: 0 },
             None
         ));
@@ -2276,6 +2402,33 @@ mod tests {
     }
 
     #[test]
+    fn preview_filter_hides_loaded_world_bottom_boundary_faces() {
+        let content = bootstrap_content().unwrap();
+        let bottom = MeshQuad {
+            block: content.block_ids.bedrock,
+            direction: FaceDirection::Down,
+            vertices: [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [1.0, 0.0, 1.0],
+                [0.0, 0.0, 1.0],
+            ],
+        };
+        let bounds = Some(RenderChunkBounds {
+            min_x: 0,
+            max_x: 0,
+            min_z: 0,
+            max_z: 0,
+        });
+
+        assert!(!should_render_preview_quad(
+            &bottom,
+            ChunkPosition { x: 0, z: 0 },
+            bounds
+        ));
+    }
+
+    #[test]
     fn splits_negative_world_positions_into_chunk_and_local_positions() {
         let (chunk, block) = split_world_block_position(WorldBlockPosition {
             x: -1,
@@ -2312,21 +2465,36 @@ mod tests {
         let content = bootstrap_content().unwrap();
         let mut world = test_client_world(&content);
 
-        let initial_dirty = world.ensure_chunks_around_render_position(Vec3::new(0.0, 0.0, 0.0));
+        let initial_dirty =
+            world.ensure_chunks_around_render_position(Vec3::new(0.0, 0.0, 0.0), usize::MAX);
         assert_eq!(world.chunks.len(), 25);
         assert_eq!(initial_dirty.len(), 25);
         assert!(initial_dirty.contains(&ChunkPosition { x: 0, z: 0 }));
         assert!(
             world
-                .ensure_chunks_around_render_position(Vec3::new(0.0, 0.0, 0.0))
+                .ensure_chunks_around_render_position(Vec3::new(0.0, 0.0, 0.0), usize::MAX)
                 .is_empty()
         );
         assert_eq!(world.chunks.len(), 25);
 
-        let distant_dirty = world.ensure_chunks_around_render_position(Vec3::new(80.0, 0.0, -72.0));
+        let distant_dirty =
+            world.ensure_chunks_around_render_position(Vec3::new(80.0, 0.0, -72.0), usize::MAX);
         assert!(!distant_dirty.is_empty());
         assert!(world.chunks.contains_key(&ChunkPosition { x: 5, z: -4 }));
         assert!(world.chunks.len() > 25);
+    }
+
+    #[test]
+    fn client_world_respects_chunk_load_budget() {
+        let content = bootstrap_content().unwrap();
+        let mut world = test_client_world(&content);
+
+        let dirty = world.ensure_chunks_around_render_position(Vec3::new(0.0, 0.0, 0.0), 3);
+
+        assert_eq!(world.chunks.len(), 3);
+        assert!(!dirty.is_empty());
+        assert!(world.chunks.contains_key(&ChunkPosition { x: 0, z: 0 }));
+        assert!(!world.chunks.contains_key(&ChunkPosition { x: -2, z: -2 }));
     }
 
     #[test]
@@ -2335,7 +2503,7 @@ mod tests {
         let mut world = test_client_world(&content);
         let position = Vec3::new(112.0, 0.0, -96.0);
 
-        world.ensure_chunks_around_render_position(position);
+        world.ensure_chunks_around_render_position(position, usize::MAX);
         let first_block = world.block(WorldBlockPosition {
             x: 120,
             y: 64,
@@ -2343,7 +2511,7 @@ mod tests {
         });
 
         let mut other_world = test_client_world(&content);
-        other_world.ensure_chunks_around_render_position(position);
+        other_world.ensure_chunks_around_render_position(position, usize::MAX);
         let second_block = other_world.block(WorldBlockPosition {
             x: 120,
             y: 64,
@@ -2375,6 +2543,58 @@ mod tests {
             vec![ChunkPosition { x: 0, z: 0 }]
         );
         assert!(world.is_solid(position));
+    }
+
+    #[test]
+    fn client_world_does_not_break_unbreakable_blocks() {
+        let content = bootstrap_content().unwrap();
+        let mut world = test_client_world(&content);
+        let mut chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, content.block_ids.air);
+        chunk
+            .set_block(
+                BlockPosition { x: 1, y: 0, z: 1 },
+                content.block_ids.bedrock,
+            )
+            .unwrap();
+        world.insert_chunk(chunk);
+        let position = WorldBlockPosition { x: 1, y: 0, z: 1 };
+
+        assert!(world.is_solid(position));
+        assert!(world.break_block(position).is_empty());
+        assert_eq!(world.block(position), Some(content.block_ids.bedrock));
+    }
+
+    #[test]
+    fn player_facing_placement_rejects_player_occupied_blocks() {
+        let content = bootstrap_content().unwrap();
+        let mut world = test_client_world(&content);
+        world.insert_chunk(Chunk::filled(
+            ChunkPosition { x: 0, z: 0 },
+            content.block_ids.air,
+        ));
+        let player_eye = Vec3::new(0.0, 1.62, 0.0);
+        let feet_block = WorldBlockPosition { x: 8, y: 64, z: 8 };
+        let head_block = WorldBlockPosition { x: 8, y: 65, z: 8 };
+        let nearby_block = WorldBlockPosition { x: 9, y: 64, z: 8 };
+
+        assert!(
+            world
+                .place_block_for_player(feet_block, content.block_ids.dirt, player_eye)
+                .is_empty()
+        );
+        assert!(
+            world
+                .place_block_for_player(head_block, content.block_ids.dirt, player_eye)
+                .is_empty()
+        );
+        assert_eq!(world.block(feet_block), Some(content.block_ids.air));
+        assert_eq!(world.block(head_block), Some(content.block_ids.air));
+
+        assert_eq!(
+            world.place_block_for_player(nearby_block, content.block_ids.dirt, player_eye),
+            vec![ChunkPosition { x: 0, z: 0 }]
+        );
+        assert_eq!(world.block(nearby_block), Some(content.block_ids.dirt));
     }
 
     #[test]
@@ -2549,6 +2769,27 @@ mod tests {
     }
 
     #[test]
+    fn camera_can_look_nearly_straight_up_and_down() {
+        let mut camera = Camera::new(Vec3::ZERO);
+
+        camera.apply_mouse_delta(0.0, -10_000.0);
+        assert!(camera.forward().y > 0.99);
+
+        camera.apply_mouse_delta(0.0, 20_000.0);
+        assert!(camera.forward().y < -0.99);
+    }
+
+    #[test]
+    fn crosshair_compensates_for_widescreen_aspect() {
+        let (vertices, _) = build_crosshair_mesh(1280, 720);
+        let horizontal_length = vertices[1].position[0] - vertices[0].position[0];
+        let vertical_length = vertices[6].position[1] - vertices[5].position[1];
+        let aspect = 1280.0 / 720.0;
+
+        assert!((horizontal_length * aspect - vertical_length).abs() < 0.001);
+    }
+
+    #[test]
     fn raycast_returns_hit_and_previous_empty_block() {
         let content = bootstrap_content().unwrap();
         let mut world = test_client_world(&content);
@@ -2577,6 +2818,18 @@ mod tests {
             .blocks
             .get_by_key("humancraft:stone")
             .expect("stone should be registered");
+        let (_, sand) = content
+            .blocks
+            .get_by_key("humancraft:sand")
+            .expect("sand should be registered");
+        let (_, sandstone) = content
+            .blocks
+            .get_by_key("humancraft:sandstone")
+            .expect("sandstone should be registered");
+        let (_, bedrock) = content
+            .blocks
+            .get_by_key("humancraft:bedrock")
+            .expect("bedrock should be registered");
 
         assert_eq!(
             texture_key_for_direction(grass, FaceDirection::Up),
@@ -2597,5 +2850,57 @@ mod tests {
         assert!(
             load_texture_pixels(texture_key_for_direction(stone, FaceDirection::North)).is_some()
         );
+        assert!(load_texture_pixels(texture_key_for_direction(sand, FaceDirection::Up)).is_some());
+        assert!(
+            load_texture_pixels(texture_key_for_direction(sandstone, FaceDirection::Up)).is_some()
+        );
+        assert!(
+            load_texture_pixels(texture_key_for_direction(bedrock, FaceDirection::Up)).is_some()
+        );
+    }
+
+    #[test]
+    fn every_registered_non_air_block_uses_loadable_textures() {
+        let content = bootstrap_content().unwrap();
+
+        for (_, definition) in content.blocks.iter() {
+            if definition.key == "humancraft:air" {
+                continue;
+            }
+
+            for key in block_texture_keys(definition) {
+                assert_ne!(
+                    key, "humancraft:missing",
+                    "{} should not use the missing texture fallback",
+                    definition.key
+                );
+                assert!(
+                    load_texture_pixels(key).is_some(),
+                    "{} references an invalid texture key {key}",
+                    definition.key
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn oak_textures_load_and_leaves_have_cutout_alpha() {
+        let content = bootstrap_content().unwrap();
+        let (_, log) = content
+            .blocks
+            .get_by_key("humancraft:oak_log")
+            .expect("oak log should be registered");
+        let (_, leaves) = content
+            .blocks
+            .get_by_key("humancraft:oak_leaves")
+            .expect("oak leaves should be registered");
+
+        assert!(load_texture_pixels(texture_key_for_direction(log, FaceDirection::Up)).is_some());
+
+        let pixels = load_texture_pixels(texture_key_for_direction(leaves, FaceDirection::North))
+            .expect("oak leaves texture should load");
+        let transparent_pixels = pixels.chunks_exact(4).filter(|pixel| pixel[3] < 32).count();
+
+        assert!(transparent_pixels > 72);
     }
 }
