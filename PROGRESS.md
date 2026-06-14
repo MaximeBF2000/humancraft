@@ -1,6 +1,6 @@
 # HumanCraft Progress
 
-Last updated: 2026-06-13
+Last updated: 2026-06-14
 
 ## Done
 
@@ -258,6 +258,91 @@ Last updated: 2026-06-13
 - Saved edited chunks after block changes and saved player position/camera
   orientation when pausing, losing focus, or closing the window.
 - Added developer documentation for world saves.
+- Split HumanCraft content bootstrap by domain:
+  - `src/content/blocks.rs`
+  - `src/content/items.rs`
+  - `src/content/generation.rs`
+- Split windowed-client implementation by ownership:
+  - `src/app/windowed/client_world.rs` for loaded chunks, raycasts, block
+    edits, collision checks, spawn search, and loot updates
+  - `src/app/windowed/inventory_interaction.rs` for inventory click/drag and
+    save conversion behavior
+  - `src/app/windowed/constants.rs` for explicit windowed-client tuning values
+- Further split the client-world layer so `src/app/windowed/client_world.rs`
+  only owns client chunk state, streaming, raycasts, block edits, and render
+  mesh preparation:
+  - `src/app/windowed/player_collision.rs` owns spawn search, player AABB
+    collision, ground support, and occupied-placement rejection
+  - `src/app/windowed/spatial.rs` owns world/render coordinate conversion,
+    block positions, AABB helpers, and dirty-neighbor chunk selection
+  - `src/app/windowed/loot.rs` owns dropped loot spawning, physics, and pickup
+- Added `docs/developer/systems/windowed_client.md` to document current
+  windowed-client module boundaries and future split candidates.
+- Updated architecture documentation to point future client work at the new
+  module boundaries.
+- Added a reusable item stack and inventory model:
+  - `ItemStack`
+  - 36-slot player inventory
+  - 9-slot hotbar view
+  - stack merging up to item-defined max stack sizes, currently 64 by default
+- Added `LootEntity` as a lightweight world item entity with stack, position,
+  velocity, and rotation data.
+- Extended item definitions with texture keys and registered item textures for
+  all current block items and resource drops.
+- Added a `create-item-texture` project skill with a generator script for
+  16 x 16 inventory and loot item icons.
+- Generated item textures under `textures/items` for current blocks and drops:
+  dirt, grass, stone, cobblestone, ores, coal, raw ore, diamond, oak log,
+  oak leaves, oak sapling, sand, sandstone, and bedrock.
+- Added a hotbar that is always rendered at the bottom of gameplay.
+- Added the `E` inventory overlay:
+  - opens a 36-slot inventory grid
+  - releases the cursor while open
+  - closes with `E` or `Esc`
+  - keeps input comparison isolated behind a default binding helper for future
+    configurable shortcuts
+- Changed windowed block breaking to spawn configured block drops as rotating,
+  gravity-affected loot entities.
+- Added player pickup of nearby loot into inventory stacks.
+- Added shared atlas support for item textures, textured inventory icons, and
+  world-space loot billboards.
+- Fixed dropped loot rendering so the item sprite stays above its ground
+  contact point instead of dipping into terrain.
+- Changed dropped loot sprite animation to rotate around the world Y axis.
+- Made hotbar and inventory slots square in screen pixels and slightly larger
+  by sizing slot width from the current window aspect ratio.
+- Added inventory persistence to world metadata using item keys and stack
+  counts, so `Save & Quit` and reload preserve collected items.
+- Added Minecraft-style inventory manipulation for the current player
+  inventory:
+  - left click picks up, places, merges, or swaps full stacks
+  - right click splits a stack or places one carried item
+  - left drag distributes a carried stack over compatible slots
+  - right drag places one carried item into each compatible slot
+- Added a selected hotbar slot changed with the left and right arrow keys.
+- Changed right-click placement to use the selected hotbar item only when that
+  item has a placeable block target, consuming one item on successful
+  placement.
+- Added a shaded player arm overlay when the selected hotbar slot is empty.
+- Changed the in-hand overlay to render placeable block items as projected
+  three-face block meshes and non-block items as angled item sprites.
+- Fixed first-person held block and empty-hand geometry so both use stable
+  three-face cuboid projections instead of sliver-like quads.
+- Changed first-person held blocks to sample the visible south/east/top block
+  textures.
+- Added cobblestone as a real block with generated texture coverage and made
+  the cobblestone item place that block, fixing stone-drop placement.
+- Adjusted the inventory overlay to separate the main inventory rows from the
+  hotbar and use Minecraft-style gray slot framing.
+- Added regression coverage for stack merging, overflow, registered block
+  drops, loot spawning, pickup, inventory save round-tripping, square slot
+  geometry, loot Y-axis render geometry, and item texture loading.
+- Added regression coverage for inventory left-click, right-click, drag
+  distribution, right-drag placement, selected-hotbar block placement, and
+  cobblestone placement from a hotbar stack.
+- Added regression coverage that held block and player arm overlay faces stay
+  visible and non-degenerate.
+- Added developer documentation for items, inventory, and loot.
 - Added regression coverage for world metadata, saved player coordinates,
   chunk save/load round-tripping, and saved chunks overriding generation.
 - Replaced the first-pass anonymous menu rectangles with screen-specific UI
@@ -277,6 +362,34 @@ Last updated: 2026-06-13
 
 ## Verified
 
+- `cargo fmt` after splitting content and windowed-client modules.
+- `cargo check` after splitting content and windowed-client modules.
+- `cargo test` after splitting content and windowed-client modules.
+- `cargo fmt` after further splitting client-world spatial, collision, and
+  loot modules.
+- `cargo check` after further splitting client-world spatial, collision, and
+  loot modules.
+- `cargo test` after further splitting client-world spatial, collision, and
+  loot modules.
+- `cargo fmt` after adding inventory, loot, item textures, and docs.
+- `cargo test` after adding inventory, loot, item textures, and docs.
+- `cargo fmt` after fixing loot render geometry, square inventory slots, and
+  inventory saves.
+- `cargo test` after fixing loot render geometry, square inventory slots, and
+  inventory saves.
+- `cargo fmt` after adding inventory click/drag behavior, selected hotbar
+  placement, and in-hand rendering.
+- `cargo test` after adding inventory click/drag behavior, selected hotbar
+  placement, and in-hand rendering.
+- `cargo fmt` after improving held item rendering, inventory styling, and
+  cobblestone placement.
+- `cargo test --quiet` after improving held item rendering, inventory styling,
+  and cobblestone placement.
+- `cargo fmt` after correcting first-person held block and arm cuboid
+  geometry.
+- `cargo test --quiet` after correcting first-person held block and arm cuboid
+  geometry.
+- `quick_validate.py .agents/skills/create-item-texture`
 - `cargo fmt`
 - `cargo test`
 - `cargo run -- preview`
@@ -364,16 +477,15 @@ Last updated: 2026-06-13
 1. Add a cross-chunk decoration/feature placement pass so trees and future
    structures can span chunk boundaries.
 2. Add texture assets and metadata for coal, iron, gold, and diamond ore.
-3. Add hotbar/inventory-backed placement instead of infinite dirt.
-4. Add more complete swept collision and step-up behavior.
-5. Add lightweight in-game render diagnostics for mesh rebuild counts, dirty
+3. Add more complete swept collision and step-up behavior.
+4. Add lightweight in-game render diagnostics for mesh rebuild counts, dirty
    chunks, frame time, and loaded chunk count.
-6. Replace face-per-block meshing with greedy meshing or atlas-aware batching
+5. Replace face-per-block meshing with greedy meshing or atlas-aware batching
    once render distance grows.
-7. Replace temporary value noise with the planned `noise` crate.
-8. Add an unload/save policy for generated chunks before render distance grows
+6. Replace temporary value noise with the planned `noise` crate.
+7. Add an unload/save policy for generated chunks before render distance grows
    much further.
-9. Add a small in-game debug overlay showing selected block key, player chunk,
+8. Add a small in-game debug overlay showing selected block key, player chunk,
    loaded chunk count, and selected block position.
 
 ## Notes

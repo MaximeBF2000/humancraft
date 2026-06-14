@@ -16,7 +16,7 @@ saves/worlds/<world-id>/
 Each world contains:
 
 - `world.txt`: versioned metadata with name, seed, player eye position, yaw,
-  pitch, and timestamps.
+  pitch, inventory slots, and timestamps.
 - `chunks/<x>_<z>.hcc`: binary block ID data for edited or saved chunks.
 
 ## Runtime Policy
@@ -30,13 +30,16 @@ Each world contains:
   world's seed.
 - Block edits mark affected chunks dirty in memory. Gameplay does not write
   chunk files during the render/update loop.
-- Player position and camera orientation stay in memory while playing.
+- Player position, camera orientation, and inventory stay in memory while
+  playing.
 - `Save & Quit` and window close flush metadata plus dirty chunks to disk in one
   explicit save pass.
 
 ## Format Notes
 
 - Metadata is a simple `key=value` text file with `version=1`.
+- Inventory slots are saved in metadata as optional item key/count lines, so
+  item stacks survive content registration order changes.
 - Chunk files start with an `HCCNK001` magic header, store chunk coordinates,
   then write `CHUNK_VOLUME` little-endian `u32` block IDs. Flushes build one
   contiguous byte buffer per chunk before writing to avoid many tiny writes.
@@ -49,5 +52,5 @@ Each world contains:
 - There is no chunk unloading yet, so loaded chunks remain resident for the
   session.
 - Delete is immediate in the early UI.
-- World configuration only supports name and seed. Game mode, inventory,
-  health, hunger, and other player data are planned.
+- World configuration only supports name and seed. Game mode, health, hunger,
+  and other player data are planned.

@@ -29,9 +29,36 @@ In-game controls:
 - `Space`: jump
 - Mouse: look around
 - Left click: break the targeted block
-- Right click: place dirt against the targeted block
+- Right click: place the selected hotbar item when it is a placeable block
+- Left/Right arrows: change the selected hotbar slot
+- `E`: open or close the inventory overlay
 - `Esc`: open the pause overlay. `Keep Playing` resumes. `Save & Quit` flushes
-  player state and edited chunks to disk, then returns to the main menu.
+  player state, inventory, and edited chunks to disk, then returns to the main
+  menu.
+
+The hotbar is always visible at the bottom of the gameplay view. It shows the
+first nine inventory slots and item stack counts. One slot is selected at a
+time. Empty hand renders the player arm; selecting a placeable block renders a
+small 3D block in hand, while other selected items render as angled item
+sprites. Pressing `E` opens the full 36-slot inventory overlay and releases the
+cursor; pressing `E` or `Esc` closes it and recaptures mouse-look.
+
+Inventory overlay controls:
+
+- Left click a stack: pick up the whole stack.
+- Left click with a carried stack: place, merge, or swap the stack.
+- Right click a stack: pick up half of it, rounding up.
+- Right click with a carried stack: place one item into an empty or matching
+  slot.
+- Left drag with a carried stack: distribute items evenly over compatible
+  slots.
+- Right drag with a carried stack: place one item in each compatible slot.
+
+Breaking a block drops its configured loot into the world as a Y-axis rotating
+item entity. Walk close to the dropped item to pick it up. The item is added to
+the first compatible inventory stack, up to the current 64-item stack limit,
+then to the first empty slot. Stone currently drops cobblestone, and the
+cobblestone stack can be selected and placed as a block.
 
 ## Movement
 

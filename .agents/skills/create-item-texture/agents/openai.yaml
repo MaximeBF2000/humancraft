@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create Item Texture"
+  short_description: "Generate 16x16 item textures"
+  default_prompt: "Use $create-item-texture to generate Minecraft-style item icon PNGs."

@@ -107,12 +107,67 @@ status file for verification notes, next steps, and implementation details.
   or closing the game.
 - Added world-save developer documentation and regression coverage for
   metadata, chunk round-tripping, saved player state, and saved chunk reloads.
+- Split HumanCraft content bootstrap into block, item, and overworld generation
+  modules while preserving the public bootstrap API.
+- Split windowed-client internals into client-world, inventory-interaction, and
+  constants modules, reducing the app shell's ownership of gameplay helpers.
+- Further split the client-world layer into spatial helpers, player collision,
+  and dropped-loot behavior so the loaded-world module stays focused on chunk
+  state, streaming, raycasts, block edits, and mesh preparation.
+- Added developer documentation for the windowed-client module boundaries and
+  updated the architecture overview with the new structure.
 - Replaced anonymous menu rectangles with readable screen-specific UI labels
   and clickable actions for main menu, world management, new-world config,
   rename, and pause overlay.
 - Changed gameplay saves to dirty in-memory chunk/player state and flush only
   on `Save & Quit` or window close, avoiding disk writes during frame updates.
 - Buffered chunk save writes into one contiguous write per chunk during flush.
+- Added generic item stacks and a 36-slot player inventory with a 9-slot
+  always-visible hotbar.
+- Added the `E` inventory overlay with cursor release and close handling through
+  `E` or `Esc`, using an isolated default binding helper for future
+  configurable shortcuts.
+- Added dropped loot entities for block breaks. Drops come from block
+  definitions, fall under gravity, rotate continuously, and can be picked up
+  into inventory stacks.
+- Extended item definitions with texture keys and expanded the renderer atlas
+  to include item icons for inventory UI and world-space loot billboards.
+- Generated item textures for all current block items and starter resource
+  drops under `textures/items`.
+- Added the project-local `create-item-texture` skill and generator script for
+  16 x 16 item icon PNGs.
+- Added regression coverage for inventory stack merging, unresolved block
+  drops, loot spawning, pickup, and registered item texture loading.
+- Fixed dropped loot sprite placement so items render above their ground contact
+  point instead of clipping into terrain.
+- Changed dropped loot animation to rotate around the world Y axis.
+- Made hotbar and inventory slots pixel-square and slightly larger on widescreen
+  windows.
+- Persisted player inventory in world metadata using item keys and stack counts,
+  so collected items survive `Save & Quit` and world reload.
+- Added regression coverage for inventory save conversion, metadata inventory
+  round-tripping, square slot geometry, and loot Y-axis render geometry.
+- Added Minecraft-style survival inventory manipulation for the current player
+  inventory: whole-stack left click, half-stack right click, one-at-a-time right
+  click placement, left-drag stack distribution, and right-drag one-per-slot
+  placement.
+- Added selected hotbar state changed with left and right arrow keys.
+- Changed right-click block placement to use and consume the selected hotbar
+  item only when that item is placeable.
+- Added a shaded player arm overlay for an empty selected hand.
+- Changed selected hand rendering so placeable blocks draw as projected
+  three-face block meshes and non-block items draw as angled item sprites.
+- Fixed first-person held block and arm projections to use stable visible
+  three-face cuboid geometry, with held blocks sampling south/east/top block
+  textures.
+- Added cobblestone as a registered block with generated block textures, and
+  made the cobblestone item place that block so stone drops can be placed.
+- Updated the inventory and hotbar styling with Minecraft-like gray slot
+  framing and a separated hotbar row in the full inventory overlay.
+- Added regression coverage for click/drag inventory behavior and selected
+  hotbar placement, including cobblestone placement.
+- Added regression coverage for first-person held block and arm overlay
+  geometry.
 - Updated `PROGRESS.md` throughout the work with implementation notes,
   verification results, and next steps.
 - Added and ran tests covering texture metadata mapping, real stone PNG
@@ -243,6 +298,25 @@ status file for verification notes, next steps, and implementation details.
   movement needed to land on it.
 - Increased movement forgiveness so one-block jumps work from a normal
   approach distance instead of requiring near-perfect positioning.
+- Added a 9-slot hotbar, full inventory overlay on `E`, block-break loot drops,
+  gravity-affected rotating dropped items, and pickup into player inventory.
+- Fixed dropped item render placement, changed dropped item rotation to the Y
+  axis, and made inventory slots pixel-square.
+- Added selected-hotbar placement, selected hand rendering, and left/right arrow
+  hotbar selection.
+- Added cobblestone block placement for stone drops and improved first-person
+  held item rendering.
+
+### Items And Inventory
+
+- Added `ItemStack` and `Inventory` as reusable engine-side item containers.
+- Added `LootEntity` as lightweight world item data for dropped stacks.
+- Added item texture metadata to item definitions.
+- Registered missing starter item definitions needed by existing block drops,
+  including cobblestone.
+- Added texture coverage for all registered starter items.
+- Persisted player inventory to world metadata as item keys and counts.
+- Added player-inventory click and drag manipulation behavior.
 
 ### Skills And Tooling
 

@@ -21,6 +21,7 @@ pub struct WorldMetadata {
     pub name: String,
     pub seed: u64,
     pub player: PlayerSave,
+    pub inventory: InventorySave,
     pub created_at_unix_seconds: u64,
     pub updated_at_unix_seconds: u64,
 }
@@ -33,6 +34,7 @@ impl WorldMetadata {
             name,
             seed,
             player,
+            inventory: InventorySave::empty(36),
             created_at_unix_seconds: now,
             updated_at_unix_seconds: now,
         }
@@ -56,6 +58,34 @@ impl PlayerSave {
             eye_z,
             yaw,
             pitch,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InventorySave {
+    pub slots: Vec<Option<ItemStackSave>>,
+}
+
+impl InventorySave {
+    pub fn empty(slot_count: usize) -> Self {
+        Self {
+            slots: vec![None; slot_count],
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemStackSave {
+    pub item_key: String,
+    pub count: u16,
+}
+
+impl ItemStackSave {
+    pub fn new(item_key: impl Into<String>, count: u16) -> Self {
+        Self {
+            item_key: item_key.into(),
+            count,
         }
     }
 }
@@ -258,7 +288,7 @@ fn write_metadata_file(path: &Path, metadata: &WorldMetadata) -> Result<(), Worl
         fs::create_dir_all(parent)?;
     }
     let escaped_name = escape_value(&metadata.name);
-    let contents = format!(
+    let mut contents = format!(
         "version=1\nid={}\nname={}\nseed={}\nplayer_eye_x={}\nplayer_eye_y={}\nplayer_eye_z={}\nplayer_yaw={}\nplayer_pitch={}\ncreated_at={}\nupdated_at={}\n",
         metadata.id,
         escaped_name,
@@ -271,6 +301,19 @@ fn write_metadata_file(path: &Path, metadata: &WorldMetadata) -> Result<(), Worl
         metadata.created_at_unix_seconds,
         metadata.updated_at_unix_seconds
     );
+    contents.push_str(&format!(
+        "inventory_slot_count={}\n",
+        metadata.inventory.slots.len()
+    ));
+    for (index, slot) in metadata.inventory.slots.iter().enumerate() {
+        if let Some(stack) = slot {
+            contents.push_str(&format!(
+                "inventory_slot_{index}={},{}\n",
+                escape_value(&stack.item_key),
+                stack.count
+            ));
+        }
+    }
     fs::write(path, contents)?;
     Ok(())
 }
@@ -291,6 +334,12 @@ fn read_metadata_file(path: &Path) -> Result<WorldMetadata, WorldSaveError> {
         ));
     }
 
+    let inventory_slot_count = values
+        .get("inventory_slot_count")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(36);
+    let inventory = read_inventory_save(&values, inventory_slot_count)?;
+
     Ok(WorldMetadata {
         id: required_string(&values, "id")?,
         name: unescape_value(&required_string(&values, "name")?),
@@ -302,9 +351,33 @@ fn read_metadata_file(path: &Path) -> Result<WorldMetadata, WorldSaveError> {
             yaw: required_parse(&values, "player_yaw")?,
             pitch: required_parse(&values, "player_pitch")?,
         },
+        inventory,
         created_at_unix_seconds: required_parse(&values, "created_at")?,
         updated_at_unix_seconds: required_parse(&values, "updated_at")?,
     })
+}
+
+fn read_inventory_save(
+    values: &std::collections::HashMap<&str, &str>,
+    slot_count: usize,
+) -> Result<InventorySave, WorldSaveError> {
+    let mut inventory = InventorySave::empty(slot_count);
+    for index in 0..slot_count {
+        let key = format!("inventory_slot_{index}");
+        let Some(value) = values.get(key.as_str()) else {
+            continue;
+        };
+        let Some((item_key, count)) = value.rsplit_once(',') else {
+            return Err(WorldSaveError::InvalidMetadata(format!("invalid {key}")));
+        };
+        inventory.slots[index] = Some(ItemStackSave::new(
+            unescape_value(item_key),
+            count
+                .parse()
+                .map_err(|_| WorldSaveError::InvalidMetadata(format!("invalid {key} count")))?,
+        ));
+    }
+    Ok(inventory)
 }
 
 fn required_string(
@@ -438,6 +511,37 @@ mod tests {
         assert_eq!(loaded.name, "Seeded Test");
         assert_eq!(loaded.seed, 12345);
         assert_eq!(loaded.player, PlayerSave::new(1.0, 72.5, -3.25, 0.4, -0.2));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn world_metadata_round_trips_inventory_slots() {
+        let root = temp_save_root("inventory");
+        let _ = fs::remove_dir_all(&root);
+        let store = WorldSaveStore::new(&root);
+
+        let mut metadata = store
+            .create_world(
+                "Inventory Test",
+                12345,
+                PlayerSave::new(1.0, 72.5, -3.25, 0.4, -0.2),
+            )
+            .unwrap();
+        metadata.inventory.slots[0] = Some(ItemStackSave::new("humancraft:dirt", 64));
+        metadata.inventory.slots[9] = Some(ItemStackSave::new("humancraft:diamond", 3));
+        store.save_metadata(&metadata).unwrap();
+
+        let loaded = store.load_metadata(&metadata.id).unwrap();
+
+        assert_eq!(
+            loaded.inventory.slots[0],
+            Some(ItemStackSave::new("humancraft:dirt", 64))
+        );
+        assert_eq!(
+            loaded.inventory.slots[9],
+            Some(ItemStackSave::new("humancraft:diamond", 3))
+        );
 
         let _ = fs::remove_dir_all(root);
     }
