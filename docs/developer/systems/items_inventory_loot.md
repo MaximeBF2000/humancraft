@@ -43,11 +43,14 @@ simulation until a fuller gameplay/entity layer exists.
 
 Current behavior:
 
-- Left-click block breaking replaces the block with air and spawns configured
-  loot unless the block is tagged `unbreakable`.
+- Holding left click advances block breaking according to
+  `BlockDefinition::hardness`. A block is replaced with air and spawns
+  configured loot only after its current break progress reaches the required
+  duration. Blocks tagged `unbreakable` never start break progress.
 - Holding left or right click repeats block breaking or selected-hotbar block
-  placement at the explicit block-interaction cadence in
-  `src/app/windowed/constants.rs`.
+  placement at explicit cadences. Left-click breaking is continuous
+  hardness-based progress; right-click placement still uses the repeat cadence
+  in `src/app/windowed/constants.rs`.
 - Loot falls under gravity, damps against the ground, and rotates once per
   second around the world Y axis.
 - Loot spawns within the broken block's newly opened space so a solid block

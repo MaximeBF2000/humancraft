@@ -258,6 +258,26 @@ Last updated: 2026-06-14
 - Saved edited chunks after block changes and saved player position/camera
   orientation when pausing, losing focus, or closing the window.
 - Added developer documentation for world saves.
+- Added hardness-based survival block breaking in the windowed client:
+  - break duration is derived from `BlockDefinition::hardness`
+  - holding left click accumulates progress on the targeted block
+  - releasing left click or changing targets clears current progress
+  - blocks tagged `unbreakable` never start break progress
+  - successful breaks still use the existing data-driven drop path
+- Added staged crack overlay lines for the currently attacked block.
+- Added regression coverage for hardness break timing, target-change progress
+  reset, unbreakable break progress rejection, held-left-click cadence, and
+  staged crack overlay geometry.
+- Replaced the line-based break overlay with a Minecraft-style staged 16 x 16
+  pixel crack mask rendered as filled block-face quads.
+- Extracted break overlay mesh generation to
+  `src/app/windowed/block_break_overlay.rs`.
+- Extracted windowed WGSL shader strings to `src/app/windowed/shaders.rs`.
+- Extracted windowed camera movement, key input, and shared render vertex types
+  to focused `camera`, `input`, and `render_types` modules.
+- Updated `DEV_PHILOSOPHY.md` and windowed-client developer docs with an
+  explicit 250-line file-size target and a rule to split responsibilities
+  before adding behavior to oversized files.
 - Split HumanCraft content bootstrap by domain:
   - `src/content/blocks.rs`
   - `src/content/items.rs`
@@ -276,6 +296,13 @@ Last updated: 2026-06-14
   - `src/app/windowed/spatial.rs` owns world/render coordinate conversion,
     block positions, AABB helpers, and dirty-neighbor chunk selection
   - `src/app/windowed/loot.rs` owns dropped loot spawning, physics, and pickup
+- Continued the `src/app/windowed.rs` refactor by extracting app input,
+  frame update/render/remesh orchestration, session state, world lifecycle,
+  texture atlas loading, world render mesh conversion, HUD geometry, menu UI,
+  inventory UI, UI glyph building, and windowed-client regression tests.
+- Reduced `src/app/windowed.rs` from 4,830 lines to 720 lines in this pass.
+- Documented remaining oversized windowed-client files as follow-up extraction
+  candidates before new behavior is added there.
 - Added `docs/developer/systems/windowed_client.md` to document current
   windowed-client module boundaries and future split candidates.
 - Updated architecture documentation to point future client work at the new
@@ -486,6 +513,12 @@ Last updated: 2026-06-14
   placement fixes.
 - `cargo run` launched successfully after remesh throttling, texture coverage,
   and placement fixes and was stopped with Ctrl-C after startup validation.
+- `cargo fmt` after adding hardness-based survival block breaking.
+- `cargo test` after adding hardness-based survival block breaking.
+- `cargo fmt` after replacing the break overlay and extracting windowed modules.
+- `cargo test` after replacing the break overlay and extracting windowed modules.
+- `cargo fmt` after the windowed-client responsibility split.
+- `cargo test` after the windowed-client responsibility split.
 
 ## Next Concrete Steps
 

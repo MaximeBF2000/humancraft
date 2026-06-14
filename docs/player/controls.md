@@ -28,7 +28,9 @@ In-game controls:
 - Hold `Shift`: sneak
 - `Space`: jump
 - Mouse: look around
-- Left click or hold left click: break targeted blocks
+- Hold left click: damage the targeted block until its material strength is
+  exhausted. Softer blocks break quickly; stone and ores take longer. Releasing
+  the button or aiming at another block resets the current damage.
 - Right click or hold right click: place the selected hotbar item when it is a
   placeable block
 - Left/Right arrows: change the selected hotbar slot

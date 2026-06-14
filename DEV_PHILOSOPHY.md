@@ -478,6 +478,40 @@ RecipeSystem
 
 ---
 
+# Keep Files Small And Owned
+
+Large files are architectural failures, not harmless inconvenience.
+
+A source file should have one clear responsibility and should normally stay
+under 250 lines, including tests. If a change would push a file beyond that
+limit, split the responsibility first.
+
+Do not grow a file because it is already large. A large existing file is a
+reason to extract a cohesive module before adding more behavior.
+
+Bad:
+
+- One window/client file that owns input, UI, rendering, save flow, gameplay
+  interaction, shaders, mesh builders, and tests.
+- Adding "just one helper" to a file that already has unrelated responsibilities.
+- Mixing rendering details with gameplay rules because the caller currently
+  has convenient access to both.
+
+Good:
+
+- One module for the app/event-loop shell.
+- One module for world interaction state.
+- One module for each renderer-owned mesh or overlay builder.
+- One module for menu state.
+- One module for inventory interaction.
+- Tests colocated with the smallest module that owns the behavior.
+
+When a file must temporarily exceed 250 lines during a refactor, document the
+remaining split candidate and do not add unrelated features to that file until
+the excess responsibility is removed.
+
+---
+
 # Document Before Expanding
 
 When adding a new mechanic:

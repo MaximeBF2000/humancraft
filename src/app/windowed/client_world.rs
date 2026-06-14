@@ -10,18 +10,34 @@ use crate::engine::world::{
     BlockId, BlockRegistry, Chunk, ChunkPosition, Inventory, ItemRegistry, LootEntity,
 };
 
+use super::constants::{HAND_BREAK_SECONDS_PER_HARDNESS, MIN_BLOCK_BREAK_SECONDS};
+use super::render_types::Vertex;
 use super::spatial::{
     WorldBlockPosition, chunk_position_for_render_position,
     dirty_horizontal_chunk_positions_for_block, horizontal_neighbor_chunk_positions,
     neighbor_world_block_position, split_world_block_position, world_block_from_render,
     world_block_position_from_chunk_position,
 };
-use super::{RenderChunkBounds, TextureAtlas, Vertex, build_render_mesh};
+use super::texture::TextureAtlas;
+use super::world_render::{RenderChunkBounds, build_render_mesh};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub(super) struct RaycastHit {
     pub(super) block: WorldBlockPosition,
     pub(super) previous: WorldBlockPosition,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub(super) struct BlockBreakProgress {
+    pub(super) target: WorldBlockPosition,
+    pub(super) ratio: f32,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+struct ActiveBlockBreak {
+    target: WorldBlockPosition,
+    elapsed_seconds: f32,
+    required_seconds: f32,
 }
 
 pub(super) struct ClientWorld {
@@ -36,6 +52,7 @@ pub(super) struct ClientWorld {
     generation_context: GenerationContext,
     render_distance_chunks: i32,
     mesher: ChunkMesher,
+    active_block_break: Option<ActiveBlockBreak>,
 }
 
 impl ClientWorld {
@@ -60,6 +77,7 @@ impl ClientWorld {
             generation_context,
             render_distance_chunks,
             mesher: ChunkMesher,
+            active_block_break: None,
         }
     }
 
@@ -237,7 +255,13 @@ impl ClientWorld {
         None
     }
 
+    #[cfg(test)]
     pub(super) fn break_block(&mut self, position: WorldBlockPosition) -> Vec<ChunkPosition> {
+        self.clear_block_break_progress();
+        self.break_block_immediately(position)
+    }
+
+    fn break_block_immediately(&mut self, position: WorldBlockPosition) -> Vec<ChunkPosition> {
         if self.is_unbreakable(position) {
             return Vec::new();
         }
@@ -245,6 +269,52 @@ impl ClientWorld {
             self.spawn_loot_for_block(block, position);
         }
         self.set_block(position, self.block_ids.air)
+    }
+
+    pub(super) fn continue_breaking_block(
+        &mut self,
+        position: WorldBlockPosition,
+        delta_seconds: f32,
+    ) -> Vec<ChunkPosition> {
+        let Some(required_seconds) = self.block_break_seconds(position) else {
+            self.clear_block_break_progress();
+            return Vec::new();
+        };
+
+        let progress = self.active_block_break.get_or_insert(ActiveBlockBreak {
+            target: position,
+            elapsed_seconds: 0.0,
+            required_seconds,
+        });
+        if progress.target != position {
+            *progress = ActiveBlockBreak {
+                target: position,
+                elapsed_seconds: 0.0,
+                required_seconds,
+            };
+        } else {
+            progress.required_seconds = required_seconds;
+        }
+
+        progress.elapsed_seconds += delta_seconds.max(0.0);
+        if progress.elapsed_seconds < progress.required_seconds {
+            return Vec::new();
+        }
+
+        self.active_block_break = None;
+        self.break_block_immediately(position)
+    }
+
+    pub(super) fn clear_block_break_progress(&mut self) {
+        self.active_block_break = None;
+    }
+
+    pub(super) fn block_break_progress(&self) -> Option<BlockBreakProgress> {
+        let progress = self.active_block_break?;
+        Some(BlockBreakProgress {
+            target: progress.target,
+            ratio: (progress.elapsed_seconds / progress.required_seconds).clamp(0.0, 1.0),
+        })
     }
 
     pub(super) fn place_block(
@@ -270,6 +340,15 @@ impl ClientWorld {
             .and_then(|block| self.blocks.get(block))
             .map(|definition| definition.has_tag("unbreakable"))
             .unwrap_or(false)
+    }
+
+    fn block_break_seconds(&self, position: WorldBlockPosition) -> Option<f32> {
+        let block = self.block(position)?;
+        let definition = self.blocks.get(block)?;
+        if definition.has_tag("unbreakable") || definition.hardness <= 0.0 {
+            return None;
+        }
+        Some((definition.hardness * HAND_BREAK_SECONDS_PER_HARDNESS).max(MIN_BLOCK_BREAK_SECONDS))
     }
 
     pub(super) fn block(&self, position: WorldBlockPosition) -> Option<BlockId> {

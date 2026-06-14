@@ -114,6 +114,12 @@ status file for verification notes, next steps, and implementation details.
 - Further split the client-world layer into spatial helpers, player collision,
   and dropped-loot behavior so the loaded-world module stays focused on chunk
   state, streaming, raycasts, block edits, and mesh preparation.
+- Further reduced the windowed app shell by extracting input handling, frame
+  update/render/remesh orchestration, session state, world lifecycle actions,
+  texture atlas loading, world render conversion, HUD geometry, menu UI,
+  inventory UI, and UI glyph building into focused modules.
+- Moved windowed-client regression tests out of `src/app/windowed.rs` and into
+  `src/app/windowed/tests.rs`.
 - Added developer documentation for the windowed-client module boundaries and
   updated the architecture overview with the new structure.
 - Replaced anonymous menu rectangles with readable screen-specific UI labels
@@ -177,6 +183,14 @@ status file for verification notes, next steps, and implementation details.
   geometry.
 - Added regression coverage for held block interaction cadence and
   blocked-above loot drops.
+- Added survival-style block resistance: holding left click now accumulates
+  break progress from registered block hardness, resets when the target changes
+  or input stops, respects unbreakable blocks, and shows staged crack overlay
+  lines on the attacked block.
+- Replaced block break overlay lines with Minecraft-style staged 16 x 16 crack
+  pixels, extracted the overlay builder, shader sources, camera movement, key
+  input, and shared render types from `windowed.rs`, and documented the
+  250-line file-size target in the development philosophy.
 - Updated `PROGRESS.md` throughout the work with implementation notes,
   verification results, and next steps.
 - Added and ran tests covering texture metadata mapping, real stone PNG
