@@ -28,8 +28,9 @@ In-game controls:
 - Hold `Shift`: sneak
 - `Space`: jump
 - Mouse: look around
-- Left click: break the targeted block
-- Right click: place the selected hotbar item when it is a placeable block
+- Left click or hold left click: break targeted blocks
+- Right click or hold right click: place the selected hotbar item when it is a
+  placeable block
 - Left/Right arrows: change the selected hotbar slot
 - `E`: open or close the inventory overlay
 - `Esc`: open the pause overlay. `Keep Playing` resumes. `Save & Quit` flushes
@@ -39,9 +40,9 @@ In-game controls:
 The hotbar is always visible at the bottom of the gameplay view. It shows the
 first nine inventory slots and item stack counts. One slot is selected at a
 time. Empty hand renders the player arm; selecting a placeable block renders a
-small 3D block in hand, while other selected items render as angled item
-sprites. Pressing `E` opens the full 36-slot inventory overlay and releases the
-cursor; pressing `E` or `Esc` closes it and recaptures mouse-look.
+larger lower-right 3D block in hand, while other selected items render as
+angled item sprites. Pressing `E` opens the full 36-slot inventory overlay and
+releases the cursor; pressing `E` or `Esc` closes it and recaptures mouse-look.
 
 Inventory overlay controls:
 

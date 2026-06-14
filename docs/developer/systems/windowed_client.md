@@ -20,7 +20,8 @@ features do not accumulate in the event-loop shell.
 - `src/app/windowed/inventory_interaction.rs`: player inventory click, drag,
   cursor-stack, and save conversion helpers.
 - `src/app/windowed/constants.rs`: explicit windowed-client tuning constants
-  for movement, chunk budgets, inventory layout, and loot behavior.
+  for movement, chunk budgets, inventory layout, block-interaction cadence, and
+  loot behavior.
 
 ## Rules
 

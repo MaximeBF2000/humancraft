@@ -23,6 +23,7 @@ pub(super) const SPRINT_DOUBLE_TAP_SECONDS: f32 = 0.3;
 pub(super) const NORMAL_FOV_DEGREES: f32 = 70.0;
 pub(super) const SPRINT_FOV_DEGREES: f32 = 78.0;
 pub(super) const INVENTORY_HOTBAR_SLOTS: usize = 9;
+pub(super) const BLOCK_INTERACTION_REPEAT_SECONDS: f32 = 0.15;
 pub(super) const LOOT_GRAVITY_PER_TICK: f32 = 0.04;
 pub(super) const LOOT_AIR_DRAG: f32 = 0.98;
 pub(super) const LOOT_GROUND_DRAG: f32 = 0.6;

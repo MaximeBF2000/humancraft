@@ -322,6 +322,7 @@ struct RenderState {
     inventory_open: bool,
     inventory_cursor: Option<ItemStack>,
     inventory_drag: Option<InventoryDrag>,
+    held_block_interaction: HeldBlockInteraction,
     selected_hotbar_slot: usize,
     last_frame: Instant,
 }
@@ -333,6 +334,40 @@ enum AppMode {
     ConfigNewWorld,
     RenamingWorld,
     InGame,
+}
+
+#[derive(Debug, Default, Copy, Clone)]
+struct HeldBlockInteraction {
+    button: Option<MouseButton>,
+    repeat_seconds: f32,
+}
+
+impl HeldBlockInteraction {
+    fn press(&mut self, button: MouseButton) {
+        self.button = Some(button);
+        self.repeat_seconds = 0.0;
+    }
+
+    fn release(&mut self, button: MouseButton) {
+        if self.button == Some(button) {
+            self.clear();
+        }
+    }
+
+    fn clear(&mut self) {
+        self.button = None;
+        self.repeat_seconds = 0.0;
+    }
+
+    fn repeat_button(&mut self, delta_seconds: f32) -> Option<MouseButton> {
+        let button = self.button?;
+        self.repeat_seconds += delta_seconds;
+        if self.repeat_seconds < BLOCK_INTERACTION_REPEAT_SECONDS {
+            return None;
+        }
+        self.repeat_seconds = 0.0;
+        Some(button)
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -826,6 +861,7 @@ impl RenderState {
             inventory_open: false,
             inventory_cursor: None,
             inventory_drag: None,
+            held_block_interaction: HeldBlockInteraction::default(),
             selected_hotbar_slot: 0,
             last_frame: Instant::now(),
         }
@@ -1050,7 +1086,8 @@ impl RenderState {
             return;
         }
 
-        if mouse_state != ElementState::Pressed {
+        if mouse_state == ElementState::Released {
+            self.held_block_interaction.release(button);
             return;
         }
 
@@ -1065,22 +1102,11 @@ impl RenderState {
             return;
         }
 
-        let Some(world) = self.world.as_mut() else {
+        if !matches!(button, MouseButton::Left | MouseButton::Right) {
             return;
-        };
-        let Some(hit) = world.raycast(self.camera.position, self.camera.forward()) else {
-            return;
-        };
-
-        let dirty_chunks = match button {
-            MouseButton::Left => world.break_block(hit.block),
-            MouseButton::Right => world.place_selected_hotbar_block_for_player(
-                hit.previous,
-                self.selected_hotbar_slot,
-                self.camera.position,
-            ),
-            _ => Vec::new(),
-        };
+        }
+        self.held_block_interaction.press(button);
+        let dirty_chunks = self.apply_block_interaction(button);
 
         if !dirty_chunks.is_empty() {
             self.mark_dirty_chunks_for_save(&dirty_chunks);
@@ -1095,6 +1121,7 @@ impl RenderState {
         if paused {
             self.stow_inventory_cursor();
             self.inventory_drag = None;
+            self.held_block_interaction.clear();
         }
         self.paused = paused;
         if paused {
@@ -1116,6 +1143,7 @@ impl RenderState {
         if self.mode != AppMode::InGame || self.paused {
             return;
         }
+        self.held_block_interaction.clear();
         if !inventory_open {
             self.stow_inventory_cursor();
             self.inventory_drag = None;
@@ -1245,6 +1273,9 @@ impl RenderState {
                     &self.save_store,
                 ));
             }
+            if let Some(button) = self.held_block_interaction.repeat_button(delta_seconds) {
+                dirty_chunks.extend(self.apply_block_interaction(button));
+            }
         }
         if self.mode == AppMode::InGame && !self.paused {
             if let Some(world) = self.world.as_mut() {
@@ -1266,6 +1297,25 @@ impl RenderState {
         );
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
+    }
+
+    fn apply_block_interaction(&mut self, button: MouseButton) -> Vec<ChunkPosition> {
+        let Some(world) = self.world.as_mut() else {
+            return Vec::new();
+        };
+        let Some(hit) = world.raycast(self.camera.position, self.camera.forward()) else {
+            return Vec::new();
+        };
+
+        match button {
+            MouseButton::Left => world.break_block(hit.block),
+            MouseButton::Right => world.place_selected_hotbar_block_for_player(
+                hit.previous,
+                self.selected_hotbar_slot,
+                self.camera.position,
+            ),
+            _ => Vec::new(),
+        }
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -3220,12 +3270,12 @@ struct HeldBlockOverlayFaces {
 
 fn held_block_overlay_faces(aspect: f32) -> HeldBlockOverlayFaces {
     let scale_x = 1.0 / aspect.max(0.1);
-    let adjust = |x: f32, y: f32| [0.70 + (x - 0.70) * scale_x, y, 0.0];
-    let front_bottom_left = adjust(0.51, -0.96);
-    let front_bottom_right = adjust(0.80, -0.91);
-    let front_top_right = adjust(0.80, -0.63);
-    let front_top_left = adjust(0.51, -0.68);
-    let depth = |point: [f32; 3]| [point[0] + 0.095 * scale_x, point[1] + 0.115, 0.0];
+    let adjust = |x: f32, y: f32| [0.72 + (x - 0.72) * scale_x, y, 0.0];
+    let front_bottom_left = adjust(0.45, -0.96);
+    let front_bottom_right = adjust(0.82, -0.88);
+    let front_top_right = adjust(0.82, -0.50);
+    let front_top_left = adjust(0.45, -0.58);
+    let depth = |point: [f32; 3]| [point[0] + 0.15 * scale_x, point[1] + 0.14, 0.0];
     let back_top_left = depth(front_top_left);
     let back_top_right = depth(front_top_right);
     let back_bottom_right = depth(front_bottom_right);
@@ -3260,12 +3310,12 @@ struct UiFace {
 
 fn player_arm_overlay_faces(aspect: f32) -> [UiFace; 3] {
     let scale_x = 1.0 / aspect.max(0.1);
-    let adjust = |x: f32, y: f32| [0.76 + (x - 0.76) * scale_x, y, 0.0];
-    let wrist_left = adjust(0.65, -0.99);
-    let wrist_right = adjust(0.86, -0.99);
-    let elbow_left = adjust(0.60, -0.64);
-    let elbow_right = adjust(0.75, -0.56);
-    let depth = |point: [f32; 3]| [point[0] + 0.20 * scale_x, point[1] + 0.06, 0.0];
+    let adjust = |x: f32, y: f32| [0.78 + (x - 0.78) * scale_x, y, 0.0];
+    let wrist_left = adjust(0.64, -0.99);
+    let wrist_right = adjust(0.91, -0.99);
+    let elbow_left = adjust(0.56, -0.61);
+    let elbow_right = adjust(0.78, -0.49);
+    let depth = |point: [f32; 3]| [point[0] + 0.18 * scale_x, point[1] + 0.07, 0.0];
     let wrist_right_back = depth(wrist_right);
     let elbow_right_back = depth(elbow_right);
     let elbow_left_back = depth(elbow_left);
@@ -3298,10 +3348,10 @@ fn push_held_sprite_mesh(
         vertices,
         indices,
         [
-            adjust(0.62, -0.92),
-            adjust(0.94, -0.82),
-            adjust(0.85, -0.47),
-            adjust(0.53, -0.57),
+            adjust(0.58, -0.94),
+            adjust(0.96, -0.80),
+            adjust(0.84, -0.39),
+            adjust(0.46, -0.53),
         ],
         tile,
         [1.0, 1.0, 1.0],
@@ -4527,6 +4577,38 @@ mod tests {
     }
 
     #[test]
+    fn held_block_overlay_is_framed_like_a_first_person_held_block() {
+        let faces = held_block_overlay_faces(16.0 / 9.0);
+        let all_points = faces
+            .front
+            .into_iter()
+            .chain(faces.right)
+            .chain(faces.top)
+            .collect::<Vec<_>>();
+        let min_x = all_points
+            .iter()
+            .map(|point| point[0])
+            .fold(f32::MAX, f32::min);
+        let max_x = all_points
+            .iter()
+            .map(|point| point[0])
+            .fold(f32::MIN, f32::max);
+        let min_y = all_points
+            .iter()
+            .map(|point| point[1])
+            .fold(f32::MAX, f32::min);
+        let max_y = all_points
+            .iter()
+            .map(|point| point[1])
+            .fold(f32::MIN, f32::max);
+
+        assert!(min_x > 0.55);
+        assert!(max_x < 0.90);
+        assert!(min_y < -0.90);
+        assert!(max_y > -0.45);
+    }
+
+    #[test]
     fn player_arm_overlay_uses_three_visible_faces() {
         let faces = player_arm_overlay_faces(16.0 / 9.0);
 
@@ -4552,6 +4634,47 @@ mod tests {
         assert!(corners.iter().all(|corner| corner.y >= 2.0));
         assert!(corners.iter().any(|corner| corner.z.abs() > 0.20));
         assert!(corners.iter().all(|corner| corner.x.abs() < 0.001));
+    }
+
+    #[test]
+    fn held_block_interaction_repeats_after_cadence_until_released() {
+        let mut interaction = HeldBlockInteraction::default();
+
+        interaction.press(MouseButton::Right);
+        assert_eq!(interaction.repeat_button(0.05), None);
+        assert_eq!(interaction.repeat_button(0.09), None);
+        assert_eq!(interaction.repeat_button(0.01), Some(MouseButton::Right));
+        assert_eq!(interaction.repeat_button(0.01), None);
+        interaction.release(MouseButton::Right);
+        assert_eq!(
+            interaction.repeat_button(BLOCK_INTERACTION_REPEAT_SECONDS),
+            None
+        );
+    }
+
+    #[test]
+    fn loot_from_block_below_another_block_spawns_in_open_space_and_falls() {
+        let content = bootstrap_content().unwrap();
+        let mut world = test_client_world(&content);
+        let mut chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, content.block_ids.air);
+        chunk
+            .set_block(BlockPosition { x: 1, y: 1, z: 1 }, content.block_ids.stone)
+            .unwrap();
+        chunk
+            .set_block(BlockPosition { x: 1, y: 2, z: 1 }, content.block_ids.dirt)
+            .unwrap();
+        world.insert_chunk(chunk);
+
+        world.break_block(WorldBlockPosition { x: 1, y: 1, z: 1 });
+        assert_eq!(world.loot_entities.len(), 1);
+        assert!(world.loot_entities[0].position.y + LOOT_RENDER_HALF_SIZE * 2.0 < 2.0);
+
+        let player_far_away = Vec3::new(8.0, PLAYER_STANDING_EYE_HEIGHT + 1.0, 8.0);
+        for _ in 0..20 {
+            world.update_loot(player_far_away, PHYSICS_TICK_SECONDS);
+        }
+
+        assert!(world.loot_entities[0].position.y < 1.5);
     }
 
     fn quad_area(points: [[f32; 3]; 4]) -> f32 {

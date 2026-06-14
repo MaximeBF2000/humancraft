@@ -43,15 +43,30 @@ impl ClientWorld {
             loot.velocity.y -= LOOT_GRAVITY_PER_TICK * ticks;
             loot.velocity *= LOOT_AIR_DRAG.powf(ticks);
 
-            let next = loot.position + loot.velocity * ticks;
-            if self.collides_loot_at(next) {
+            let movement = loot.velocity * ticks;
+            let next_x = loot.position + Vec3::new(movement.x, 0.0, 0.0);
+            if self.collides_loot_at(next_x) {
+                loot.velocity.x = 0.0;
+            } else {
+                loot.position = next_x;
+            }
+
+            let next_z = loot.position + Vec3::new(0.0, 0.0, movement.z);
+            if self.collides_loot_at(next_z) {
+                loot.velocity.z = 0.0;
+            } else {
+                loot.position = next_z;
+            }
+
+            let next_y = loot.position + Vec3::new(0.0, movement.y, 0.0);
+            if self.collides_loot_at(next_y) {
                 if loot.velocity.y < 0.0 {
-                    loot.velocity.y = 0.0;
                     loot.velocity.x *= LOOT_GROUND_DRAG;
                     loot.velocity.z *= LOOT_GROUND_DRAG;
                 }
+                loot.velocity.y = 0.0;
             } else {
-                loot.position = next;
+                loot.position = next_y;
             }
             self.loot_entities[index] = loot;
         }
@@ -94,5 +109,5 @@ fn loot_spawn_offset(position: WorldBlockPosition, item: ItemId) -> Vec3 {
         ^ position.z as i64 * 83_492_791
         ^ item.raw() as i64 * 2_654_435_761;
     let angle = (seed as f32).sin() * std::f32::consts::TAU;
-    Vec3::new(angle.cos() * 0.12, 0.10, angle.sin() * 0.12)
+    Vec3::new(angle.cos() * 0.12, -0.24, angle.sin() * 0.12)
 }

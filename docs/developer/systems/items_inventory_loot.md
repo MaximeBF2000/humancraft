@@ -45,8 +45,13 @@ Current behavior:
 
 - Left-click block breaking replaces the block with air and spawns configured
   loot unless the block is tagged `unbreakable`.
+- Holding left or right click repeats block breaking or selected-hotbar block
+  placement at the explicit block-interaction cadence in
+  `src/app/windowed/constants.rs`.
 - Loot falls under gravity, damps against the ground, and rotates once per
   second around the world Y axis.
+- Loot spawns within the broken block's newly opened space so a solid block
+  directly above the break does not trap the drop in an ungatherable collision.
 - Loot is picked up when the player is close enough and the inventory can
   accept the stack.
 - `E` toggles the inventory overlay. The comparison is isolated through the
@@ -73,10 +78,11 @@ with the window aspect ratio so they are square in screen pixels. A textured UI
 pass draws item icons. Dropped loot renders as double-sided textured quads in
 the world pass so depth testing works against terrain.
 
-When no hotbar item is selected, gameplay renders a shaded three-face player
-arm overlay. When a stack is selected, placeable block items render as
-projected front/right/top cube faces using the block's south/east/top textures
-in the first-person overlay. Non-block items render as angled item sprites.
+When no hotbar item is selected, gameplay renders a shaded three-face
+lower-right player arm overlay. When a stack is selected, placeable block items
+render as a larger lower-right projected block with front/right/top cube faces
+using the block's south/east/top textures in the first-person overlay.
+Non-block items render as angled item sprites.
 
 ## Tests
 
@@ -86,9 +92,13 @@ Keep regression coverage focused on player-facing behavior and data integrity:
 - inventory left-click, right-click, left-drag, and right-drag stack behavior
 - selected hotbar block placement and non-placeable item rejection
 - stone-dropped cobblestone placement
-- held block and arm overlay geometry staying visible and non-degenerate
+- held block and arm overlay geometry staying visible, non-degenerate, and
+  framed in the lower-right first-person view
+- held block interaction repeat cadence
 - block drops resolving to registered items
 - breaking blocks spawning configured loot
+- loot from a broken block under another block spawning in open space and
+  falling normally
 - pickup adding loot to inventory
 - inventory save conversion and metadata round-tripping
 - square inventory slot geometry

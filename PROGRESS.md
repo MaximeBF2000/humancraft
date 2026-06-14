@@ -323,6 +323,9 @@ Last updated: 2026-06-14
 - Changed right-click placement to use the selected hotbar item only when that
   item has a placeable block target, consuming one item on successful
   placement.
+- Added held left/right block interaction with an explicit repeat cadence, so
+  holding right click continues placing selected hotbar blocks while placement
+  remains valid and inventory remains available.
 - Added a shaded player arm overlay when the selected hotbar slot is empty.
 - Changed the in-hand overlay to render placeable block items as projected
   three-face block meshes and non-block items as angled item sprites.
@@ -330,6 +333,11 @@ Last updated: 2026-06-14
   three-face cuboid projections instead of sliver-like quads.
 - Changed first-person held blocks to sample the visible south/east/top block
   textures.
+- Tuned first-person held arm, block, and item overlay geometry toward a
+  larger lower-right Minecraft-style framing.
+- Fixed dropped loot spawning under a solid block above the break position by
+  spawning drops in the newly opened block space and resolving loot collision
+  per axis.
 - Added cobblestone as a real block with generated texture coverage and made
   the cobblestone item place that block, fixing stone-drop placement.
 - Adjusted the inventory overlay to separate the main inventory rows from the
@@ -342,6 +350,9 @@ Last updated: 2026-06-14
   cobblestone placement from a hotbar stack.
 - Added regression coverage that held block and player arm overlay faces stay
   visible and non-degenerate.
+- Added regression coverage for held block interaction cadence, lower-right
+  held block framing, and loot from a block broken directly below another block
+  falling normally.
 - Added developer documentation for items, inventory, and loot.
 - Added regression coverage for world metadata, saved player coordinates,
   chunk save/load round-tripping, and saved chunks overriding generation.
@@ -389,6 +400,10 @@ Last updated: 2026-06-14
   geometry.
 - `cargo test --quiet` after correcting first-person held block and arm cuboid
   geometry.
+- `cargo fmt` after adding held block interactions, first-person overlay
+  tuning, and blocked-above loot fixes.
+- `cargo test` after adding held block interactions, first-person overlay
+  tuning, and blocked-above loot fixes.
 - `quick_validate.py .agents/skills/create-item-texture`
 - `cargo fmt`
 - `cargo test`

@@ -154,12 +154,19 @@ status file for verification notes, next steps, and implementation details.
 - Added selected hotbar state changed with left and right arrow keys.
 - Changed right-click block placement to use and consume the selected hotbar
   item only when that item is placeable.
+- Added held left/right block interactions with an explicit repeat cadence, so
+  holding right click continues placing selected hotbar blocks while placement
+  remains valid.
 - Added a shaded player arm overlay for an empty selected hand.
 - Changed selected hand rendering so placeable blocks draw as projected
   three-face block meshes and non-block items draw as angled item sprites.
 - Fixed first-person held block and arm projections to use stable visible
   three-face cuboid geometry, with held blocks sampling south/east/top block
   textures.
+- Tuned first-person held arm, block, and item overlay geometry toward a
+  larger lower-right Minecraft-style framing.
+- Fixed dropped loot from blocks broken directly under another block so drops
+  spawn in the opened block space, fall normally, and remain gatherable.
 - Added cobblestone as a registered block with generated block textures, and
   made the cobblestone item place that block so stone drops can be placed.
 - Updated the inventory and hotbar styling with Minecraft-like gray slot
@@ -168,6 +175,8 @@ status file for verification notes, next steps, and implementation details.
   hotbar placement, including cobblestone placement.
 - Added regression coverage for first-person held block and arm overlay
   geometry.
+- Added regression coverage for held block interaction cadence and
+  blocked-above loot drops.
 - Updated `PROGRESS.md` throughout the work with implementation notes,
   verification results, and next steps.
 - Added and ran tests covering texture metadata mapping, real stone PNG
