@@ -8,8 +8,8 @@ features do not accumulate in the event-loop shell.
 
 - `src/app/windowed.rs`: winit/wgpu app shell, GPU pipeline setup, top-level
   `RenderState` storage, and application-handler wiring.
-- `src/app/windowed/app_input.rs`: keyboard, mouse, pause, inventory cursor,
-  and held block interaction handling for `RenderState`.
+- `src/app/windowed/app_input.rs`: keyboard, mouse, pause, inventory/crafting
+  cursor, and held block interaction handling for `RenderState`.
 - `src/app/windowed/block_break_overlay.rs`: Minecraft-style staged block
   damage mask generation as 16 x 16 pixel quads for the current break target.
 - `src/app/windowed/camera.rs`: player camera orientation, fixed-tick movement,
@@ -22,8 +22,9 @@ features do not accumulate in the event-loop shell.
   continuation, chunk remesh queue processing, render pass construction, and
   target overlay updates.
 - `src/app/windowed/hud.rs`: crosshair and selected-block outline geometry.
-- `src/app/windowed/inventory_ui.rs`: hotbar, inventory overlay, item icon,
-  held item/block, player arm, and dropped-loot billboard mesh construction.
+- `src/app/windowed/inventory_ui.rs`: hotbar, inventory/crafting overlays,
+  item icon, held item/block, player arm, and dropped-loot billboard mesh
+  construction.
 - `src/app/windowed/player_collision.rs`: safe spawn search, player AABB
   collision checks, ground support checks, and occupied-block placement
   rejection.

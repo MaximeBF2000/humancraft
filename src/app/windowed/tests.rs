@@ -1,4 +1,5 @@
 use super::spatial::{split_world_block_position, world_block_from_render};
+use super::ui::UiRect;
 use super::*;
 use crate::content::{GameContent, bootstrap_content, default_generation_pipeline};
 use crate::engine::mesh::chunk_mesher::{FaceDirection, MeshQuad};
@@ -8,6 +9,7 @@ fn test_client_world(content: &GameContent) -> ClientWorld {
     ClientWorld::new(
         content.blocks.clone(),
         content.items.clone(),
+        content.recipes.clone(),
         content.block_ids,
         default_generation_pipeline(content.block_ids),
         GenerationContext {
@@ -343,6 +345,7 @@ fn saved_chunks_override_generation_when_streaming() {
     let mut world = ClientWorld::new(
         content.blocks.clone(),
         content.items.clone(),
+        content.recipes.clone(),
         content.block_ids,
         default_generation_pipeline(content.block_ids),
         GenerationContext {
@@ -627,6 +630,64 @@ fn inventory_slots_are_square_in_screen_pixels() {
     assert!((slot_width(hotbar) * aspect - slot_height(hotbar)).abs() < 0.0001);
     assert!((slot_width(inventory) * aspect - slot_height(inventory)).abs() < 0.0001);
     assert!(slot_height(hotbar) > 0.10);
+}
+
+#[test]
+fn full_inventory_layout_keeps_crafting_and_player_slots_separate() {
+    for aspect in [4.0 / 3.0, 16.0 / 9.0] {
+        let player_slots: Vec<_> = (0..Inventory::player().slot_count())
+            .map(|index| inventory_slot_rect(index, true, aspect))
+            .collect();
+        let inventory_crafting_slots: Vec<_> = (0..4)
+            .map(|index| crafting_input_slot_rect(index, CraftingUiKind::Inventory, aspect))
+            .collect();
+        let table_crafting_slots: Vec<_> = (0..9)
+            .map(|index| crafting_input_slot_rect(index, CraftingUiKind::Table, aspect))
+            .collect();
+        let inventory_result = crafting_result_slot_rect(CraftingUiKind::Inventory, aspect);
+        let table_result = crafting_result_slot_rect(CraftingUiKind::Table, aspect);
+
+        assert_rects_do_not_overlap(&player_slots, &inventory_crafting_slots);
+        assert_rects_do_not_overlap(&player_slots, &table_crafting_slots);
+        assert!(
+            player_slots
+                .iter()
+                .all(|slot| !rects_overlap(*slot, inventory_result))
+        );
+        assert!(
+            player_slots
+                .iter()
+                .all(|slot| !rects_overlap(*slot, table_result))
+        );
+        assert!(
+            inventory_crafting_slots
+                .iter()
+                .all(|slot| !rects_overlap(*slot, inventory_result))
+        );
+        assert!(
+            table_crafting_slots
+                .iter()
+                .all(|slot| !rects_overlap(*slot, table_result))
+        );
+    }
+}
+
+fn assert_rects_do_not_overlap(left: &[UiRect], right: &[UiRect]) {
+    for left_rect in left {
+        for right_rect in right {
+            assert!(
+                !rects_overlap(*left_rect, *right_rect),
+                "rectangles should not overlap: {left_rect:?} and {right_rect:?}"
+            );
+        }
+    }
+}
+
+fn rects_overlap(left: UiRect, right: UiRect) -> bool {
+    left.left < right.right
+        && left.right > right.left
+        && left.bottom < right.top
+        && left.top > right.bottom
 }
 
 #[test]

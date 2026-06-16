@@ -32,7 +32,8 @@ In-game controls:
   exhausted. Softer blocks break quickly; stone and ores take longer. Releasing
   the button or aiming at another block resets the current damage.
 - Right click or hold right click: place the selected hotbar item when it is a
-  placeable block
+  placeable block. Right clicking a crafting table opens its crafting UI
+  instead.
 - Left/Right arrows: change the selected hotbar slot
 - `E`: open or close the inventory overlay
 - `Esc`: open the pause overlay. `Keep Playing` resumes. `Save & Quit` flushes
@@ -46,13 +47,21 @@ larger lower-right 3D block in hand, while other selected items render as
 angled item sprites. Pressing `E` opens the full 36-slot inventory overlay and
 releases the cursor; pressing `E` or `Esc` closes it and recaptures mouse-look.
 
-Inventory overlay controls:
+The inventory overlay includes a 2 x 2 crafting grid. Put one oak log in any
+crafting slot to produce four oak planks. Put oak planks in all four 2 x 2
+crafting slots to craft a crafting table. Right click a placed crafting table
+to open the 3 x 3 crafting table grid. Crafting inputs are returned to the
+player inventory when the UI closes, space permitting.
+
+Inventory and crafting overlay controls:
 
 - Left click a stack: pick up the whole stack.
 - Left click with a carried stack: place, merge, or swap the stack.
 - Right click a stack: pick up half of it, rounding up.
 - Right click with a carried stack: place one item into an empty or matching
   slot.
+- Left click a crafting result: take the result and consume one set of
+  ingredients from the crafting grid.
 - Left drag with a carried stack: distribute items evenly over compatible
   slots.
 - Right drag with a carried stack: place one item in each compatible slot.

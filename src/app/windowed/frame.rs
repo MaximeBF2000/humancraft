@@ -47,19 +47,40 @@ impl RenderState {
     }
 
     pub(super) fn apply_block_interaction(&mut self, button: MouseButton) -> Vec<ChunkPosition> {
-        let Some(world) = self.world.as_mut() else {
-            return Vec::new();
-        };
-        let Some(hit) = world.raycast(self.camera.position, self.camera.forward()) else {
+        let Some(hit) = self
+            .world
+            .as_ref()
+            .and_then(|world| world.raycast(self.camera.position, self.camera.forward()))
+        else {
             return Vec::new();
         };
 
         match button {
-            MouseButton::Right => world.place_selected_hotbar_block_for_player(
-                hit.previous,
-                self.selected_hotbar_slot,
-                self.camera.position,
-            ),
+            MouseButton::Right => {
+                if self
+                    .world
+                    .as_ref()
+                    .and_then(|world| {
+                        world
+                            .block(hit.block)
+                            .and_then(|block| world.blocks.get(block))
+                    })
+                    .is_some_and(|definition| definition.has_tag("crafting_table"))
+                {
+                    self.open_crafting_table();
+                    return Vec::new();
+                }
+                self.world
+                    .as_mut()
+                    .map(|world| {
+                        world.place_selected_hotbar_block_for_player(
+                            hit.previous,
+                            self.selected_hotbar_slot,
+                            self.camera.position,
+                        )
+                    })
+                    .unwrap_or_default()
+            }
             _ => Vec::new(),
         }
     }
@@ -82,6 +103,9 @@ impl RenderState {
                 build_gameplay_ui_mesh(
                     world,
                     self.inventory_open,
+                    self.crafting_ui_kind(),
+                    self.active_crafting_grid(),
+                    self.crafting_result,
                     aspect,
                     self.selected_hotbar_slot,
                     self.inventory_cursor,
@@ -99,6 +123,9 @@ impl RenderState {
                     world,
                     &self.texture_atlas,
                     self.inventory_open,
+                    self.crafting_ui_kind(),
+                    self.active_crafting_grid(),
+                    self.crafting_result,
                     aspect,
                     self.selected_hotbar_slot,
                     self.inventory_cursor,

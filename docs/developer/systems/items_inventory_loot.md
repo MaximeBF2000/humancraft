@@ -11,10 +11,15 @@ item IDs and stack counts, not concrete content types.
 - `ItemStack` stores an `ItemId` plus a count.
 - `Inventory` owns fixed slots and merges compatible stacks before using empty
   slots.
+- `CraftingRecipeDefinition` lives in `src/engine/world/crafting.rs`.
+  Recipes are registered in a `CraftingRecipeRegistry` and can be shapeless or
+  shaped. Shapeless recipes match ingredients anywhere in the grid; shaped
+  recipes match an exact pattern inside the available grid.
 - Player inventory is currently 36 slots, with the first 9 slots rendered as
   the always-visible hotbar.
 - `RenderState` owns transient UI state for a carried cursor stack, current
-  drag operation, and selected hotbar index.
+  drag operation, selected hotbar index, the 2 x 2 inventory crafting grid,
+  the 3 x 3 crafting table grid, and the current crafting result.
 - `LootEntity` lives in `src/engine/world/loot.rs` and stores an item stack,
   world position, velocity, and rotation.
 
@@ -35,6 +40,24 @@ Keep this path data-driven:
 - If a dropped block resource should be placeable, register it as a block item
   with a `place_block` target. Stone uses this path by dropping placeable
   cobblestone.
+
+## Crafting
+
+Recipes are content data, not windowed-client branches. Add or update
+HumanCraft recipes in `src/content/recipes.rs`; keep the engine matcher generic
+and resolve item keys through `ItemRegistry`.
+
+Current starter crafting content:
+
+- shapeless `humancraft:oak_planks_from_oak_log`: one `humancraft:oak_log`
+  anywhere in a 2 x 2 or 3 x 3 grid produces four `humancraft:oak_planks`.
+- shaped `humancraft:crafting_table_from_oak_planks`: a filled 2 x 2 square of
+  `humancraft:oak_planks` produces one `humancraft:crafting_table`.
+
+The windowed client owns only transient crafting inputs. Closing inventory,
+pausing, saving, or switching back to menus attempts to return crafting-grid
+stacks to the player inventory. Crafting output is recomputed from recipe data
+after every input-grid change.
 
 ## Windowed Gameplay
 
@@ -67,6 +90,8 @@ Current behavior:
 - Left and right arrows move the selected hotbar slot.
 - Right-click block placement only works when the selected hotbar item has a
   `place_block` target. Successful placement consumes one item.
+- Right clicking a block tagged `crafting_table` opens the 3 x 3 crafting table
+  UI instead of placing a block against it.
 - `Save & Quit` and window close persist player inventory in world metadata as
   item keys and counts.
 
@@ -92,6 +117,7 @@ Non-block items render as angled item sprites.
 Keep regression coverage focused on player-facing behavior and data integrity:
 
 - inventory stack merging and overflow
+- recipe matching for shapeless and shaped crafting
 - inventory left-click, right-click, left-drag, and right-drag stack behavior
 - selected hotbar block placement and non-placeable item rejection
 - stone-dropped cobblestone placement

@@ -65,6 +65,18 @@ pub fn register_items(items: &mut ItemRegistry, _blocks: BlockIds) -> Result<(),
         "Oak Leaves",
         "humancraft:oak_leaves",
     )?;
+    register_block_item(
+        items,
+        "humancraft:oak_planks",
+        "Oak Planks",
+        "humancraft:oak_planks",
+    )?;
+    register_block_item(
+        items,
+        "humancraft:crafting_table",
+        "Crafting Table",
+        "humancraft:crafting_table",
+    )?;
     items.register(
         ItemDefinition::new("humancraft:oak_sapling", "Oak Sapling")
             .texture(item_texture_key("humancraft:oak_sapling"))

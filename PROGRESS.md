@@ -258,6 +258,21 @@ Last updated: 2026-06-14
 - Saved edited chunks after block changes and saved player position/camera
   orientation when pausing, losing focus, or closing the window.
 - Added developer documentation for world saves.
+- Added data-driven crafting recipes through `CraftingRecipeDefinition` and
+  `CraftingRecipeRegistry`, with shapeless and shaped matching.
+- Added oak planks and crafting table blocks/items through content bootstrap.
+- Generated oak plank and crafting table block/item textures under
+  `textures/blocks` and `textures/items`.
+- Added a 2 x 2 crafting grid to the inventory overlay and a 3 x 3 crafting
+  table overlay opened by right clicking a crafting table block.
+- Added the first craft: one oak log anywhere in the crafting grid produces
+  four oak planks.
+- Added regression coverage for shapeless and shaped recipe matching, plus
+  existing texture coverage for the newly registered blocks/items.
+- Added the crafting table recipe: a 2 x 2 square of oak planks crafts one
+  crafting table.
+- Reworked full-inventory UI slot sizing and layout so crafting controls and
+  player inventory slots do not overlap at common 4:3 and 16:9 window aspects.
 - Added hardness-based survival block breaking in the windowed client:
   - break duration is derived from `BlockDefinition::hardness`
   - holding left click accumulates progress on the targeted block

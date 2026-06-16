@@ -10,9 +10,22 @@ use super::texture::{AtlasTile, TextureAtlas};
 use super::ui::{UiPoint, UiRect};
 use super::ui_builder::UiMeshBuilder;
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub(super) enum CraftingUiKind {
+    Inventory,
+    Table,
+}
+
+const OPEN_INVENTORY_SLOT_HEIGHT: f32 = 0.086;
+const CLOSED_HOTBAR_SLOT_HEIGHT: f32 = 0.112;
+const INVENTORY_GAP_Y: f32 = 0.012;
+
 pub(super) fn build_gameplay_ui_mesh(
     world: &ClientWorld,
     inventory_open: bool,
+    crafting_kind: CraftingUiKind,
+    crafting_grid: &Inventory,
+    crafting_result: Option<ItemStack>,
     aspect: f32,
     selected_hotbar_slot: usize,
     cursor_stack: Option<ItemStack>,
@@ -20,12 +33,44 @@ pub(super) fn build_gameplay_ui_mesh(
 ) -> (Vec<Vertex>, Vec<u32>) {
     let mut ui = UiMeshBuilder::default();
     if inventory_open {
-        ui.rect(UiRect::new(-0.64, -0.52, 0.64, 0.56), [0.03, 0.03, 0.03]);
-        ui.rect(UiRect::new(-0.62, -0.50, 0.62, 0.54), [0.58, 0.58, 0.56]);
-        ui.rect(UiRect::new(-0.59, -0.43, 0.59, 0.45), [0.43, 0.43, 0.41]);
-        ui.rect(UiRect::new(-0.56, -0.40, 0.56, 0.36), [0.50, 0.50, 0.48]);
-        ui.center_text(0.0, 0.47, 0.007, [0.18, 0.18, 0.17], "INVENTORY");
-        ui.center_text(0.0, -0.455, 0.0048, [0.20, 0.20, 0.19], "E OR ESC TO CLOSE");
+        ui.rect(UiRect::new(-0.70, -0.55, 0.70, 0.58), [0.03, 0.03, 0.03]);
+        ui.rect(UiRect::new(-0.68, -0.53, 0.68, 0.56), [0.58, 0.58, 0.56]);
+        ui.rect(UiRect::new(-0.65, -0.46, 0.65, 0.47), [0.43, 0.43, 0.41]);
+        ui.rect(UiRect::new(-0.62, -0.43, 0.62, 0.38), [0.50, 0.50, 0.48]);
+        ui.center_text(
+            0.0,
+            0.47,
+            0.007,
+            [0.18, 0.18, 0.17],
+            match crafting_kind {
+                CraftingUiKind::Inventory => "INVENTORY",
+                CraftingUiKind::Table => "CRAFTING TABLE",
+            },
+        );
+        ui.center_text(0.0, -0.485, 0.0048, [0.20, 0.20, 0.19], "E OR ESC TO CLOSE");
+        ui.text(-0.57, 0.39, 0.0048, [0.20, 0.20, 0.19], "CRAFTING");
+        for index in 0..crafting_grid.slot_count() {
+            draw_inventory_slot(
+                &mut ui,
+                crafting_input_slot_rect(index, crafting_kind, aspect),
+                false,
+            );
+        }
+        draw_inventory_slot(
+            &mut ui,
+            crafting_result_slot_rect(crafting_kind, aspect),
+            crafting_result.is_some(),
+        );
+        ui.center_text(
+            -0.01,
+            match crafting_kind {
+                CraftingUiKind::Inventory => 0.300,
+                CraftingUiKind::Table => 0.270,
+            },
+            0.007,
+            [0.20, 0.20, 0.19],
+            ">",
+        );
         for index in 0..world.player_inventory.slots().len() {
             let rect = inventory_slot_rect(index, true, aspect);
             draw_inventory_slot(&mut ui, rect, index == selected_hotbar_slot);
@@ -63,6 +108,33 @@ pub(super) fn build_gameplay_ui_mesh(
     }
 
     if inventory_open {
+        for (index, stack) in crafting_grid.slots().iter().enumerate() {
+            let Some(stack) = stack else {
+                continue;
+            };
+            let rect = crafting_input_slot_rect(index, crafting_kind, aspect);
+            if stack.count > 1 {
+                ui.text(
+                    rect.right - slot_width(rect) * 0.38,
+                    rect.bottom + slot_height(rect) * 0.30,
+                    0.0038,
+                    [0.96, 0.96, 0.90],
+                    &stack.count.to_string(),
+                );
+            }
+        }
+        if let Some(stack) = crafting_result {
+            if stack.count > 1 {
+                let rect = crafting_result_slot_rect(crafting_kind, aspect);
+                ui.text(
+                    rect.right - slot_width(rect) * 0.38,
+                    rect.bottom + slot_height(rect) * 0.30,
+                    0.0038,
+                    [0.96, 0.96, 0.90],
+                    &stack.count.to_string(),
+                );
+            }
+        }
         if let Some(stack) = cursor_stack {
             if stack.count > 1 {
                 let rect = carried_item_rect(cursor_point, aspect);
@@ -84,6 +156,9 @@ pub(super) fn build_inventory_icon_mesh(
     world: &ClientWorld,
     texture_atlas: &TextureAtlas,
     inventory_open: bool,
+    crafting_kind: CraftingUiKind,
+    crafting_grid: &Inventory,
+    crafting_result: Option<ItemStack>,
     aspect: f32,
     selected_hotbar_slot: usize,
     cursor_stack: Option<ItemStack>,
@@ -124,6 +199,30 @@ pub(super) fn build_inventory_icon_mesh(
         }
     }
     if inventory_open {
+        for (index, stack) in crafting_grid.slots().iter().enumerate() {
+            let Some(stack) = stack else {
+                continue;
+            };
+            let Some(definition) = world.items.get(stack.item) else {
+                continue;
+            };
+            push_textured_ui_rect(
+                &mut vertices,
+                &mut indices,
+                inventory_icon_rect(crafting_input_slot_rect(index, crafting_kind, aspect)),
+                texture_atlas.tile(&definition.texture),
+            );
+        }
+        if let Some(stack) = crafting_result {
+            if let Some(definition) = world.items.get(stack.item) {
+                push_textured_ui_rect(
+                    &mut vertices,
+                    &mut indices,
+                    inventory_icon_rect(crafting_result_slot_rect(crafting_kind, aspect)),
+                    texture_atlas.tile(&definition.texture),
+                );
+            }
+        }
         if let Some(stack) = cursor_stack {
             if let Some(definition) = world.items.get(stack.item) {
                 push_textured_ui_rect(
@@ -223,17 +322,21 @@ fn draw_player_arm(ui: &mut UiMeshBuilder, aspect: f32) {
 }
 
 pub(super) fn inventory_slot_rect(index: usize, inventory_open: bool, aspect: f32) -> UiRect {
-    let slot_height = 0.112;
+    let slot_height = if inventory_open {
+        OPEN_INVENTORY_SLOT_HEIGHT
+    } else {
+        CLOSED_HOTBAR_SLOT_HEIGHT
+    };
     let slot_width = slot_height / aspect.max(0.1);
-    let gap_y = 0.012;
+    let gap_y = INVENTORY_GAP_Y;
     let gap_x = gap_y / aspect.max(0.1);
     if inventory_open {
         let columns = 9;
         let (row, column, top_start) = if index < INVENTORY_HOTBAR_SLOTS {
-            (0, index, -0.20)
+            (0, index, -0.30)
         } else {
             let inventory_index = index - INVENTORY_HOTBAR_SLOTS;
-            (inventory_index / columns, inventory_index % columns, 0.24)
+            (inventory_index / columns, inventory_index % columns, 0.04)
         };
         let total_width = columns as f32 * slot_width + (columns - 1) as f32 * gap_x;
         let left = -total_width * 0.5 + column as f32 * (slot_width + gap_x);
@@ -254,6 +357,64 @@ pub(super) fn inventory_slot_at_point(point: UiPoint, aspect: f32) -> Option<usi
         }
     }
     None
+}
+
+pub(super) fn crafting_input_slot_at_point(
+    point: UiPoint,
+    kind: CraftingUiKind,
+    aspect: f32,
+) -> Option<usize> {
+    let slot_count = match kind {
+        CraftingUiKind::Inventory => 4,
+        CraftingUiKind::Table => 9,
+    };
+    for index in 0..slot_count {
+        if crafting_input_slot_rect(index, kind, aspect).contains(point) {
+            return Some(index);
+        }
+    }
+    None
+}
+
+pub(super) fn crafting_result_slot_at_point(
+    point: UiPoint,
+    kind: CraftingUiKind,
+    aspect: f32,
+) -> bool {
+    crafting_result_slot_rect(kind, aspect).contains(point)
+}
+
+pub(super) fn crafting_input_slot_rect(index: usize, kind: CraftingUiKind, aspect: f32) -> UiRect {
+    let slot_height = OPEN_INVENTORY_SLOT_HEIGHT;
+    let slot_width = slot_height / aspect.max(0.1);
+    let gap_y = INVENTORY_GAP_Y;
+    let gap_x = gap_y / aspect.max(0.1);
+    let columns = match kind {
+        CraftingUiKind::Inventory => 2,
+        CraftingUiKind::Table => 3,
+    };
+    let row = index / columns;
+    let column = index % columns;
+    let total_width = columns as f32 * slot_width + (columns - 1) as f32 * gap_x;
+    let left_start = -0.36 - total_width * 0.5;
+    let top_start = match kind {
+        CraftingUiKind::Inventory => 0.33,
+        CraftingUiKind::Table => 0.36,
+    };
+    let left = left_start + column as f32 * (slot_width + gap_x);
+    let top = top_start - row as f32 * (slot_height + gap_y);
+    UiRect::new(left, top - slot_height, left + slot_width, top)
+}
+
+pub(super) fn crafting_result_slot_rect(kind: CraftingUiKind, aspect: f32) -> UiRect {
+    let slot_height = OPEN_INVENTORY_SLOT_HEIGHT;
+    let slot_width = slot_height / aspect.max(0.1);
+    let left = 0.24;
+    let top = match kind {
+        CraftingUiKind::Inventory => 0.33,
+        CraftingUiKind::Table => 0.31,
+    };
+    UiRect::new(left, top - slot_height, left + slot_width, top)
 }
 
 fn inset_rect(rect: UiRect, inset: f32) -> UiRect {

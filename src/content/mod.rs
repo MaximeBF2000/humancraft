@@ -5,17 +5,19 @@
 mod blocks;
 mod generation;
 mod items;
+mod recipes;
 
 pub use blocks::BlockIds;
 pub use generation::default_generation_pipeline;
 
 use crate::engine::registry::RegistryError;
-use crate::engine::world::{BlockRegistry, ItemRegistry};
+use crate::engine::world::{BlockRegistry, CraftingRecipeRegistry, ItemRegistry};
 
 #[derive(Debug, Clone)]
 pub struct GameContent {
     pub blocks: BlockRegistry,
     pub items: ItemRegistry,
+    pub recipes: CraftingRecipeRegistry,
     pub block_ids: BlockIds,
 }
 
@@ -26,9 +28,13 @@ pub fn bootstrap_content() -> Result<GameContent, RegistryError> {
     let mut items = ItemRegistry::new();
     items::register_items(&mut items, block_ids)?;
 
+    let mut recipes = CraftingRecipeRegistry::new();
+    recipes::register_recipes(&mut recipes)?;
+
     Ok(GameContent {
         blocks,
         items,
+        recipes,
         block_ids,
     })
 }
@@ -37,7 +43,7 @@ pub fn bootstrap_content() -> Result<GameContent, RegistryError> {
 mod tests {
     use super::*;
     use crate::engine::world::{
-        BlockPosition, ChunkPosition,
+        BlockPosition, ChunkPosition, Inventory, ItemStack, crafting_result,
         generation::biome::{BiomeDefinition, BiomeSource, ExposedSurfaceRule, TerrainLayer},
         generation::{GenerationContext, GenerationPipeline, terrain::TerrainStage},
     };
@@ -57,10 +63,36 @@ mod tests {
         );
         assert!(content.blocks.get_by_key("humancraft:oak_log").is_some());
         assert!(content.blocks.get_by_key("humancraft:oak_leaves").is_some());
+        assert!(content.blocks.get_by_key("humancraft:oak_planks").is_some());
+        assert!(
+            content
+                .blocks
+                .get_by_key("humancraft:crafting_table")
+                .is_some()
+        );
         assert!(content.blocks.get_by_key("humancraft:sand").is_some());
         assert!(content.blocks.get_by_key("humancraft:sandstone").is_some());
         assert!(content.blocks.get_by_key("humancraft:bedrock").is_some());
         assert!(content.items.get_by_key("humancraft:diamond").is_some());
+        assert!(content.items.get_by_key("humancraft:oak_planks").is_some());
+        assert!(
+            content
+                .items
+                .get_by_key("humancraft:crafting_table")
+                .is_some()
+        );
+        assert!(
+            content
+                .recipes
+                .get_by_key("humancraft:oak_planks_from_oak_log")
+                .is_some()
+        );
+        assert!(
+            content
+                .recipes
+                .get_by_key("humancraft:crafting_table_from_oak_planks")
+                .is_some()
+        );
         assert_eq!(
             content
                 .items
@@ -69,6 +101,26 @@ mod tests {
             Some("humancraft:cobblestone")
         );
         assert_eq!(content.block_ids.air.raw(), 0);
+    }
+
+    #[test]
+    fn crafting_table_recipe_uses_two_by_two_oak_planks() {
+        let content = bootstrap_content().unwrap();
+        let oak_planks = content.items.id_for_key("humancraft:oak_planks").unwrap();
+        let crafting_table = content
+            .items
+            .id_for_key("humancraft:crafting_table")
+            .unwrap();
+        let mut grid = Inventory::new(4, 0);
+
+        for slot in 0..4 {
+            grid.set_slot(slot, Some(ItemStack::new(oak_planks, 1)));
+        }
+
+        assert_eq!(
+            crafting_result(&content.recipes, &content.items, &grid, 2),
+            Some(ItemStack::new(crafting_table, 1))
+        );
     }
 
     #[test]

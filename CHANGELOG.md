@@ -191,6 +191,15 @@ status file for verification notes, next steps, and implementation details.
   pixels, extracted the overlay builder, shader sources, camera movement, key
   input, and shared render types from `windowed.rs`, and documented the
   250-line file-size target in the development philosophy.
+- Added data-driven crafting recipes with shapeless and shaped matching.
+- Added oak planks and crafting table block/item content with generated block
+  and item textures.
+- Added a 2 x 2 inventory crafting grid, a 3 x 3 crafting table UI opened by
+  right clicking a crafting table block, and the first recipe: one oak log
+  crafts four oak planks from any crafting slot.
+- Added a crafting table recipe from a 2 x 2 square of oak planks.
+- Fixed full-inventory UI layout overlap by shrinking open-inventory slots and
+  separating the crafting area from the player inventory rows.
 - Updated `PROGRESS.md` throughout the work with implementation notes,
   verification results, and next steps.
 - Added and ran tests covering texture metadata mapping, real stone PNG

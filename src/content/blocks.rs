@@ -16,6 +16,8 @@ pub struct BlockIds {
     pub diamond_ore: BlockId,
     pub oak_log: BlockId,
     pub oak_leaves: BlockId,
+    pub oak_planks: BlockId,
+    pub crafting_table: BlockId,
     pub sand: BlockId,
     pub sandstone: BlockId,
     pub bedrock: BlockId,
@@ -108,6 +110,20 @@ pub fn register_blocks(blocks: &mut BlockRegistry) -> Result<BlockIds, RegistryE
             .tags(["leaves", "foliage", "tree_canopy"])
             .textures(BlockTextures::all("humancraft:block/oak_leaves/top")),
     )?;
+    let oak_planks = blocks.register(
+        BlockDefinition::new("humancraft:oak_planks", "Oak Planks")
+            .hardness(2.0)
+            .drops(["humancraft:oak_planks"])
+            .tags(["wood", "planks"])
+            .textures(BlockTextures::all("humancraft:block/oak_planks/top")),
+    )?;
+    let crafting_table = blocks.register(
+        BlockDefinition::new("humancraft:crafting_table", "Crafting Table")
+            .hardness(2.5)
+            .drops(["humancraft:crafting_table"])
+            .tags(["wood", "utility", "crafting_table"])
+            .textures(BlockTextures::all("humancraft:block/crafting_table/top")),
+    )?;
     let sand = blocks.register(
         BlockDefinition::new("humancraft:sand", "Sand")
             .hardness(0.5)
@@ -142,6 +158,8 @@ pub fn register_blocks(blocks: &mut BlockRegistry) -> Result<BlockIds, RegistryE
         diamond_ore,
         oak_log,
         oak_leaves,
+        oak_planks,
+        crafting_table,
         sand,
         sandstone,
         bedrock,

@@ -16,13 +16,13 @@ use winit::keyboard::{Key, NamedKey};
 use winit::window::{CursorGrabMode, Window, WindowAttributes, WindowId};
 
 use crate::content::{bootstrap_content, default_generation_pipeline};
-#[cfg(test)]
-use crate::engine::world::Inventory;
 use crate::engine::world::generation::GenerationContext;
 use crate::engine::world::save::{
     PlayerSave, WorldMetadata, WorldSaveError, WorldSaveStore, default_world_name, new_world_seed,
 };
-use crate::engine::world::{ChunkPosition, ItemStack};
+use crate::engine::world::{
+    ChunkPosition, Inventory, ItemStack, consume_crafting_ingredients, crafting_result,
+};
 
 mod app_input;
 mod block_break_overlay;
@@ -58,12 +58,13 @@ use inventory_interaction::{
     right_click_inventory_slot,
 };
 use inventory_ui::{
-    build_gameplay_ui_mesh, build_inventory_icon_mesh, build_loot_mesh, inventory_slot_at_point,
+    CraftingUiKind, build_gameplay_ui_mesh, build_inventory_icon_mesh, build_loot_mesh,
+    crafting_input_slot_at_point, crafting_result_slot_at_point, inventory_slot_at_point,
 };
 #[cfg(test)]
 use inventory_ui::{
-    held_block_overlay_faces, inventory_slot_rect, loot_billboard_corners,
-    player_arm_overlay_faces, slot_height, slot_width,
+    crafting_input_slot_rect, crafting_result_slot_rect, held_block_overlay_faces,
+    inventory_slot_rect, loot_billboard_corners, player_arm_overlay_faces, slot_height, slot_width,
 };
 use render_types::{CameraUniform, Vertex};
 use session::{AppMode, ConfigField, HeldBlockInteraction, NewWorldConfig, TextEntry};
@@ -223,6 +224,10 @@ struct RenderState {
     input: InputState,
     paused: bool,
     inventory_open: bool,
+    crafting_table_open: bool,
+    inventory_crafting_grid: Inventory,
+    crafting_table_grid: Inventory,
+    crafting_result: Option<ItemStack>,
     inventory_cursor: Option<ItemStack>,
     inventory_drag: Option<InventoryDrag>,
     held_block_interaction: HeldBlockInteraction,
@@ -654,6 +659,10 @@ impl RenderState {
             input: InputState::default(),
             paused: true,
             inventory_open: false,
+            crafting_table_open: false,
+            inventory_crafting_grid: Inventory::new(4, 0),
+            crafting_table_grid: Inventory::new(9, 0),
+            crafting_result: None,
             inventory_cursor: None,
             inventory_drag: None,
             held_block_interaction: HeldBlockInteraction::default(),

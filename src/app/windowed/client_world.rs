@@ -7,7 +7,8 @@ use crate::engine::mesh::chunk_mesher::{ChunkMesh, ChunkMesher};
 use crate::engine::world::generation::{GenerationContext, GenerationPipeline};
 use crate::engine::world::save::WorldSaveStore;
 use crate::engine::world::{
-    BlockId, BlockRegistry, Chunk, ChunkPosition, Inventory, ItemRegistry, LootEntity,
+    BlockId, BlockRegistry, Chunk, ChunkPosition, CraftingRecipeRegistry, Inventory, ItemRegistry,
+    LootEntity,
 };
 
 use super::constants::{HAND_BREAK_SECONDS_PER_HARDNESS, MIN_BLOCK_BREAK_SECONDS};
@@ -45,6 +46,7 @@ pub(super) struct ClientWorld {
     pub(super) chunks: HashMap<ChunkPosition, Chunk>,
     pub(super) blocks: BlockRegistry,
     pub(super) items: ItemRegistry,
+    pub(super) recipes: CraftingRecipeRegistry,
     pub(super) block_ids: BlockIds,
     pub(super) player_inventory: Inventory,
     pub(super) loot_entities: Vec<LootEntity>,
@@ -59,6 +61,7 @@ impl ClientWorld {
     pub(super) fn new(
         blocks: BlockRegistry,
         items: ItemRegistry,
+        recipes: CraftingRecipeRegistry,
         block_ids: BlockIds,
         generation_pipeline: GenerationPipeline,
         generation_context: GenerationContext,
@@ -70,6 +73,7 @@ impl ClientWorld {
             chunks: HashMap::new(),
             blocks,
             items,
+            recipes,
             block_ids,
             player_inventory: Inventory::player(),
             loot_entities: Vec::new(),

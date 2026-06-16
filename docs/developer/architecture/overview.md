@@ -21,7 +21,8 @@ implementation slice.
 
 - Blocks and items are IDs at runtime.
 - Properties live in definitions stored in registries.
-- Inventory and loot store generic item stacks, not content-specific values.
+- Inventory, crafting, and loot store generic item stacks, not content-specific
+  values.
 - Generation is a pipeline of independent stages.
 - Rendering is not allowed to own gameplay logic.
 - Content is allowed to name `humancraft:*` keys; engine code is not.

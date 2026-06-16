@@ -190,6 +190,7 @@ impl RenderState {
         let mut world = ClientWorld::new(
             content.blocks,
             content.items,
+            content.recipes,
             content.block_ids,
             pipeline,
             generation_context,
@@ -230,6 +231,10 @@ impl RenderState {
         self.player_state_dirty = false;
         self.inventory_cursor = None;
         self.inventory_drag = None;
+        self.crafting_table_open = false;
+        self.inventory_crafting_grid = Inventory::new(4, 0);
+        self.crafting_table_grid = Inventory::new(9, 0);
+        self.crafting_result = None;
         self.selected_hotbar_slot = 0;
         self.chunk_buffers = if let Some(world) = &self.world {
             build_chunk_render_buffers(&self.device, world, &self.texture_atlas, &generated_chunks)
@@ -261,6 +266,7 @@ impl RenderState {
 
     pub(super) fn flush_active_world_to_disk(&mut self) {
         self.stow_inventory_cursor();
+        self.stow_active_crafting_grid();
         let Some(metadata) = self.active_world.as_mut() else {
             return;
         };
@@ -303,6 +309,10 @@ impl RenderState {
         self.player_state_dirty = false;
         self.inventory_cursor = None;
         self.inventory_drag = None;
+        self.crafting_table_open = false;
+        self.inventory_crafting_grid = Inventory::new(4, 0);
+        self.crafting_table_grid = Inventory::new(9, 0);
+        self.crafting_result = None;
         self.input.clear_movement();
         self.paused = true;
         self.inventory_open = false;
