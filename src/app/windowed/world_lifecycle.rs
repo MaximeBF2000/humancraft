@@ -10,6 +10,8 @@ impl RenderState {
                     self.mode = AppMode::ManageWorlds;
                     self.refresh_worlds();
                     self.update_window_title();
+                } else if UI_MAIN_SETTINGS.contains(point) {
+                    self.open_settings(false);
                 }
             }
             AppMode::ManageWorlds => {
@@ -52,15 +54,56 @@ impl RenderState {
                     self.update_window_title();
                 }
             }
+            AppMode::Settings => {
+                if UI_SETTINGS_SHORTCUTS.contains(point) {
+                    self.mode = AppMode::Shortcuts;
+                    self.rebinding_shortcut = None;
+                    self.update_window_title();
+                } else if UI_SETTINGS_BACK.contains(point) {
+                    self.close_settings();
+                }
+            }
+            AppMode::Shortcuts => {
+                if UI_SHORTCUTS_BACK.contains(point) {
+                    self.mode = AppMode::Settings;
+                    self.rebinding_shortcut = None;
+                    self.update_window_title();
+                } else if let Some(index) = shortcut_hit_index(point) {
+                    self.rebinding_shortcut = Some(SHORTCUT_ACTIONS[index]);
+                    self.update_window_title();
+                }
+            }
             AppMode::InGame if self.paused => {
                 if UI_PAUSE_KEEP_PLAYING.contains(point) {
                     self.resume_game();
+                } else if UI_PAUSE_SETTINGS.contains(point) {
+                    self.open_settings(true);
                 } else if UI_PAUSE_SAVE_QUIT.contains(point) {
                     self.save_and_quit_to_main_menu();
                 }
             }
             _ => {}
         }
+    }
+
+    pub(super) fn open_settings(&mut self, return_to_pause: bool) {
+        self.settings_return_to_pause = return_to_pause;
+        self.rebinding_shortcut = None;
+        self.mode = AppMode::Settings;
+        release_cursor(&self.window);
+        self.update_window_title();
+    }
+
+    pub(super) fn close_settings(&mut self) {
+        self.rebinding_shortcut = None;
+        if self.settings_return_to_pause {
+            self.mode = AppMode::InGame;
+            self.paused = true;
+            release_cursor(&self.window);
+        } else {
+            self.mode = AppMode::MainMenu;
+        }
+        self.update_window_title();
     }
 
     pub(super) fn refresh_worlds(&mut self) {
@@ -321,6 +364,8 @@ impl RenderState {
         self.paused = true;
         self.inventory_open = false;
         self.mode = AppMode::MainMenu;
+        self.settings_return_to_pause = false;
+        self.rebinding_shortcut = None;
         self.refresh_worlds();
         release_cursor(&self.window);
         self.update_window_title();
@@ -366,6 +411,14 @@ impl RenderState {
                 "HumanCraft - Rename world: {} | type, Enter save, Esc cancel",
                 self.text_entry.display()
             ),
+            AppMode::Settings => "HumanCraft - Settings".to_string(),
+            AppMode::Shortcuts => {
+                if let Some(action) = self.rebinding_shortcut {
+                    format!("HumanCraft - Shortcuts: press key for {}", action.label())
+                } else {
+                    "HumanCraft - Shortcuts".to_string()
+                }
+            }
             AppMode::InGame => self
                 .active_world
                 .as_ref()

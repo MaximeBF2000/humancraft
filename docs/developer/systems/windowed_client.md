@@ -18,7 +18,8 @@ features do not accumulate in the event-loop shell.
 - `src/app/windowed/client_world.rs`: loaded client chunks, save-backed chunk
   streaming, raycasts, hardness-based block break progress, block edits, and
   chunk mesh preparation.
-- `src/app/windowed/input.rs`: in-game movement input state and key mapping.
+- `src/app/windowed/input.rs`: in-game movement input state driven by the
+  active shortcut bindings.
 - `src/app/windowed/frame.rs`: per-frame gameplay update, block interaction
   continuation, chunk remesh queue processing, render pass construction, and
   target overlay updates.
@@ -32,7 +33,8 @@ features do not accumulate in the event-loop shell.
 - `src/app/windowed/render_types.rs`: shared GPU vertex and camera-uniform
   structs.
 - `src/app/windowed/session.rs`: app mode, world-name text entry, new-world
-  config state, and held block interaction cadence.
+  config state, runtime shortcut bindings, settings/shortcut menu state, and
+  held block interaction cadence.
 - `src/app/windowed/spatial.rs`: render/world coordinate conversion, world block
   positions, player AABB construction, and chunk-neighbor dirtying helpers.
 - `src/app/windowed/loot.rs`: dropped item spawning, gravity/drag updates, block
@@ -46,8 +48,9 @@ features do not accumulate in the event-loop shell.
   construction.
 - `src/app/windowed/ui_builder.rs`: reusable solid-color UI mesh builder and
   bitmap glyph drawing.
-- `src/app/windowed/inventory_interaction.rs`: player inventory click, drag,
-  cursor-stack, and save conversion helpers.
+- `src/app/windowed/inventory_interaction.rs`: typed inventory slot IDs, click,
+  drag, cursor-stack, quick-transfer, double-click collect, hotbar swap, drop,
+  and save conversion helpers.
 - `src/app/windowed/constants.rs`: explicit windowed-client tuning constants
   for movement, chunk budgets, inventory layout, block-interaction cadence, and
   loot behavior.
@@ -68,6 +71,9 @@ features do not accumulate in the event-loop shell.
   should only ask for slot rectangles and icon meshes.
 - Keep constants explicit. If a value affects player-facing behavior, update
   player and developer docs when changing it.
+- Keep keyboard shortcut behavior routed through `KeyBindings` instead of
+  adding new hardcoded logical-key checks. The current shortcut editor is
+  runtime-only; add a dedicated settings save file before promising persistence.
 - Keep files under 250 lines by default. If a file is already over that limit,
   extract a cohesive responsibility before adding more behavior to it.
 - Prefer moving cohesive private helpers into a module before adding more

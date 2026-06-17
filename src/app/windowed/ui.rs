@@ -1,6 +1,7 @@
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 
 use super::render_types::Vertex;
+use super::session::SHORTCUT_ACTIONS;
 use super::ui_builder::UiMeshBuilder;
 use super::{AppMode, ConfigField, RenderState};
 
@@ -54,7 +55,8 @@ impl UiRect {
     }
 }
 
-pub(super) const UI_MAIN_PLAY: UiRect = UiRect::new(-0.28, -0.05, 0.28, 0.08);
+pub(super) const UI_MAIN_PLAY: UiRect = UiRect::new(-0.28, 0.04, 0.28, 0.17);
+pub(super) const UI_MAIN_SETTINGS: UiRect = UiRect::new(-0.28, -0.13, 0.28, 0.00);
 pub(super) const UI_WORLDS_PLAY: UiRect = UiRect::new(0.38, 0.42, 0.78, 0.54);
 pub(super) const UI_WORLDS_NEW: UiRect = UiRect::new(0.38, 0.25, 0.78, 0.37);
 pub(super) const UI_WORLDS_RENAME: UiRect = UiRect::new(0.38, 0.08, 0.78, 0.20);
@@ -66,8 +68,12 @@ pub(super) const UI_CONFIG_CREATE: UiRect = UiRect::new(-0.30, -0.32, 0.04, -0.2
 pub(super) const UI_CONFIG_BACK: UiRect = UiRect::new(0.20, -0.32, 0.54, -0.20);
 pub(super) const UI_RENAME_SAVE: UiRect = UiRect::new(-0.30, -0.20, 0.04, -0.08);
 pub(super) const UI_RENAME_BACK: UiRect = UiRect::new(0.20, -0.20, 0.54, -0.08);
-pub(super) const UI_PAUSE_KEEP_PLAYING: UiRect = UiRect::new(-0.46, -0.08, -0.02, 0.05);
-pub(super) const UI_PAUSE_SAVE_QUIT: UiRect = UiRect::new(0.02, -0.08, 0.46, 0.05);
+pub(super) const UI_PAUSE_KEEP_PLAYING: UiRect = UiRect::new(-0.46, 0.03, -0.02, 0.16);
+pub(super) const UI_PAUSE_SETTINGS: UiRect = UiRect::new(0.02, 0.03, 0.46, 0.16);
+pub(super) const UI_PAUSE_SAVE_QUIT: UiRect = UiRect::new(-0.22, -0.15, 0.22, -0.02);
+pub(super) const UI_SETTINGS_SHORTCUTS: UiRect = UiRect::new(-0.28, 0.02, 0.28, 0.15);
+pub(super) const UI_SETTINGS_BACK: UiRect = UiRect::new(-0.28, -0.16, 0.28, -0.03);
+pub(super) const UI_SHORTCUTS_BACK: UiRect = UiRect::new(-0.22, -0.82, 0.22, -0.70);
 
 pub(super) fn world_list_hit_index(point: UiPoint, world_count: usize) -> Option<usize> {
     let count = world_count.min(7);
@@ -88,6 +94,7 @@ pub(super) fn build_menu_mesh(state: &RenderState) -> (Vec<Vertex>, Vec<u32>) {
             ui.rect(UiRect::new(-1.0, -1.0, 1.0, 1.0), [0.11, 0.13, 0.14]);
             ui.center_text(0.0, 0.52, 0.018, [0.92, 0.92, 0.88], "HUMANCRAFT");
             ui.button(UI_MAIN_PLAY, "PLAY", false);
+            ui.button(UI_MAIN_SETTINGS, "SETTINGS", false);
         }
         AppMode::ManageWorlds => {
             ui.rect(UiRect::new(-1.0, -1.0, 1.0, 1.0), [0.10, 0.12, 0.13]);
@@ -175,14 +182,84 @@ pub(super) fn build_menu_mesh(state: &RenderState) -> (Vec<Vertex>, Vec<u32>) {
             ui.button(UI_RENAME_SAVE, "SAVE", false);
             ui.button(UI_RENAME_BACK, "BACK", false);
         }
+        AppMode::Settings => {
+            ui.rect(UiRect::new(-1.0, -1.0, 1.0, 1.0), [0.10, 0.12, 0.13]);
+            ui.center_text(0.0, 0.52, 0.014, [0.92, 0.92, 0.88], "SETTINGS");
+            ui.button(UI_SETTINGS_SHORTCUTS, "SHORTCUTS", false);
+            ui.button(UI_SETTINGS_BACK, "BACK", false);
+        }
+        AppMode::Shortcuts => {
+            ui.rect(UiRect::new(-1.0, -1.0, 1.0, 1.0), [0.10, 0.12, 0.13]);
+            ui.center_text(0.0, 0.86, 0.012, [0.92, 0.92, 0.88], "SHORTCUTS");
+            ui.text(
+                -0.56,
+                0.76,
+                0.0046,
+                [0.66, 0.68, 0.68],
+                "CLICK A ROW, THEN PRESS A KEY",
+            );
+            for (index, action) in SHORTCUT_ACTIONS.iter().enumerate() {
+                let rect = shortcut_row_rect(index);
+                let rebinding = state.rebinding_shortcut == Some(*action);
+                ui.rect(
+                    rect,
+                    if rebinding {
+                        [0.36, 0.36, 0.28]
+                    } else {
+                        [0.18, 0.20, 0.20]
+                    },
+                );
+                ui.text(
+                    rect.left + 0.018,
+                    rect.top - 0.020,
+                    0.0041,
+                    [0.92, 0.92, 0.88],
+                    action.label(),
+                );
+                ui.text(
+                    rect.right - 0.23,
+                    rect.top - 0.020,
+                    0.0041,
+                    if rebinding {
+                        [1.0, 1.0, 0.70]
+                    } else {
+                        [0.82, 0.84, 0.82]
+                    },
+                    if rebinding {
+                        "PRESS KEY"
+                    } else {
+                        state.key_bindings.label(*action)
+                    },
+                );
+            }
+            ui.button(UI_SHORTCUTS_BACK, "BACK", false);
+        }
         AppMode::InGame => {
             ui.rect(UiRect::new(-0.52, -0.22, 0.52, 0.30), [0.08, 0.09, 0.10]);
             ui.center_text(0.0, 0.16, 0.012, [0.92, 0.92, 0.88], "PAUSED");
             ui.button(UI_PAUSE_KEEP_PLAYING, "KEEP PLAYING", false);
+            ui.button(UI_PAUSE_SETTINGS, "SETTINGS", false);
             ui.button(UI_PAUSE_SAVE_QUIT, "SAVE & QUIT", false);
         }
     }
     ui.finish()
+}
+
+pub(super) fn shortcut_row_rect(index: usize) -> UiRect {
+    let column = index / 10;
+    let row = index % 10;
+    let left = if column == 0 { -0.72 } else { 0.04 };
+    let top = 0.68 - row as f32 * 0.115;
+    UiRect::new(left, top - 0.082, left + 0.68, top)
+}
+
+pub(super) fn shortcut_hit_index(point: UiPoint) -> Option<usize> {
+    for index in 0..SHORTCUT_ACTIONS.len() {
+        if shortcut_row_rect(index).contains(point) {
+            return Some(index);
+        }
+    }
+    None
 }
 
 fn self_clamped_text(text: &str) -> &str {

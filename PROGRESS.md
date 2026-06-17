@@ -4,6 +4,46 @@ Last updated: 2026-06-17
 
 ## Done
 
+- Fixed inventory tooltip layering so tooltips draw after item icons, changed
+  tooltip styling to dark gray, and increased tooltip padding.
+- Changed fast double-left-click collection to track the clicked item rather
+  than requiring the second click to land on a still-filled slot, so collecting
+  matching visible stacks works after the first click picks up the source
+  stack.
+- Changed left-drag stack distribution to update optimistically while dragging
+  by restoring the drag-start player/crafting inventory snapshot and
+  redistributing across the currently dragged slots.
+- Added a runtime Settings menu reachable from the main menu and pause menu,
+  with a Shortcuts screen for rebinding movement, jump, crouch, inventory,
+  pause, drop, hotbar previous/next, and hotbar slot selection keys.
+- Routed gameplay movement, inventory toggling, dropping, and hotbar selection
+  through the active shortcut bindings. Dropping now also works in gameplay for
+  the selected hotbar slot, with `Ctrl` still dropping the full stack.
+- Added regression coverage for rebindable movement shortcuts and shortcut menu
+  row hit detection.
+- Improved the open inventory and crafting table UI toward the Minecraft
+  reference:
+  - larger item icons and stack counts
+  - stronger gray beveled slot contrast
+  - hovered slot highlight
+  - item-name tooltip following the cursor and clamped to the screen
+- Expanded inventory interactions for visible player and crafting slots:
+  - shift-click quick transfer between hotbar and main inventory
+  - shift-click crafting result crafts as many results as fit
+  - double-left click while carrying a stack collects matching visible stacks
+  - number keys `1` through `9` swap the hovered slot with the matching hotbar
+    slot
+  - `Q` and `Ctrl+Q` drop one item or a full stack from the cursor or hovered
+    slot
+  - clicking outside the inventory while carrying a stack drops it near the
+    player with a small forward impulse
+  - drag distribution now works across compatible player and crafting input
+    slots instead of only player inventory slots
+- Added typed windowed-client inventory slot IDs and reusable helper functions
+  for quick transfer, double-click collection, hotbar swaps, and stack drops.
+- Added regression coverage for shift-click transfer, double-click collect,
+  hotbar swapping, stack decrement/full-stack drops, and dropped inventory
+  stack spawn impulse.
 - Read `PRD.md` and `DEV_PHILOSOPHY.md`.
 - Added reusable tool metadata to item definitions:
   - tool kind

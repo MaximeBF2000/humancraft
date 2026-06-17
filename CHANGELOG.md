@@ -7,6 +7,33 @@ status file for verification notes, next steps, and implementation details.
 
 ### Latest Session Summary
 
+- Fixed inventory tooltip draw order so tooltips render above item icons, and
+  restyled them with dark gray borders and more readable padding.
+- Changed double-click collection to track the clicked item, fixing the common
+  fast double-click path where the first click empties the hovered source slot.
+- Added optimistic left-drag stack distribution updates while dragging.
+- Added runtime Settings and Shortcuts menus from both the main menu and pause
+  menu. Movement, jump, crouch, inventory, pause, drop, and hotbar selection
+  keys can be rebound for the current session.
+- Routed gameplay controls through the active shortcut bindings and added
+  gameplay hotbar dropping through the drop shortcut.
+- Added regression coverage for rebindable movement shortcuts and shortcut menu
+  row hit detection.
+- Improved the inventory and crafting table UI with larger item icons, larger
+  stack counts, stronger Minecraft-like beveled slot contrast, hovered slot
+  highlights, and item-name tooltips.
+- Added typed inventory slot IDs plus reusable interaction helpers for
+  shift-click transfer, double-click collection, hotbar number swaps, and
+  cursor/slot stack drops.
+- Added shift-click quick transfer between hotbar and main inventory,
+  shift-click craft-as-many-as-fit, double-click collect matching visible
+  stacks, `1` through `9` hotbar swapping for hovered slots, `Q`/`Ctrl+Q`
+  inventory drops, and click-outside cursor stack dropping with a small forward
+  toss.
+- Extended drag distribution to compatible crafting input slots as well as
+  player inventory slots.
+- Added regression tests for shift-click transfer, double-click collection,
+  hotbar swapping, drop helpers, and dropped inventory-stack spawn impulse.
 - Read the project PRD, development philosophy, and progress notes before
   continuing implementation.
 - Added reusable tool metadata to item definitions and reusable harvest

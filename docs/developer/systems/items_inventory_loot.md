@@ -128,9 +128,26 @@ Current behavior:
 - Inventory clicks follow the Minecraft survival baseline:
   - left click picks up, places, merges, or swaps whole stacks
   - right click splits a slot stack or places one carried item
-  - left drag distributes a carried stack over compatible slots
-  - right drag places one carried item in each compatible slot
+  - shift-left click transfers player stacks between hotbar and main inventory
+    or shift-crafts as many results as fit
+  - left drag distributes a carried stack over compatible player or crafting
+    slots
+  - right drag places one carried item in each compatible player or crafting
+    slot
+  - double-left click while carrying a stack collects matching visible stacks
+    up to the item stack limit
+  - number keys `1` through `9` swap a hovered player or crafting slot with the
+    matching hotbar slot
+  - `Q` and `Ctrl+Q` drop one item or a full stack from the cursor or hovered
+    slot into the world with a small forward impulse
+  - left-drag distribution restores the drag-start inventory snapshot and
+    reapplies the distribution on every newly entered slot so the UI updates
+    optimistically while dragging
 - Left and right arrows move the selected hotbar slot.
+- The current UI has no separate armor, offhand, creative, chest, or furnace
+  inventories yet. `InventorySlotId` keeps the player/crafting behavior typed
+  so future slot regions can be added without binding rules to screen
+  coordinates.
 - Right-click block placement only works when the selected hotbar item has a
   `place_block` target. Successful placement consumes one item.
 - Right clicking a block tagged `crafting_table` opens the 3 x 3 crafting table
@@ -146,12 +163,14 @@ use `humancraft:item/<name>` texture keys that resolve to
 
 The flat UI pass lays out the open inventory and crafting table from the
 original 176 x 166 container texture coordinates, then renders Minecraft-style
-slot frames with one-to-two-pixel bevels and stack counts with a small dark text
-shadow. Inventory slots are sized with the window aspect ratio so they are
+slot frames with one-to-two-pixel bevels, hover highlights, larger item stack
+counts with a dark text shadow, and item-name tooltips. Tooltips are drawn in a
+final solid UI pass after textured item icons so they stay above items and slot
+contents. Inventory slots are sized with the window aspect ratio so they are
 square in screen pixels. A textured UI pass draws non-block item icons as
-sprites and placeable block item icons as small isometric block meshes using
-the block's south/east/top textures. Dropped loot renders non-block items as
-double-sided textured quads, while placeable block drops render as small
+sprites and placeable block item icons as larger small isometric block meshes
+using the block's south/east/top textures. Dropped loot renders non-block items
+as double-sided textured quads, while placeable block drops render as small
 rotating cubes with block face textures.
 
 When no hotbar item is selected, gameplay renders a textured three-face
@@ -169,6 +188,8 @@ Keep regression coverage focused on player-facing behavior and data integrity:
 - inventory stack merging and overflow
 - recipe matching for shapeless and shaped crafting
 - inventory left-click, right-click, left-drag, and right-drag stack behavior
+- shift-click transfer, double-click collect, hotbar key swap, and inventory
+  drop helpers
 - selected hotbar block placement and non-placeable item rejection
 - stone-dropped cobblestone placement
 - held block and arm overlay geometry staying visible, non-degenerate, and

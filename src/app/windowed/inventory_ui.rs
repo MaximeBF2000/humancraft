@@ -33,34 +33,36 @@ pub(super) fn build_gameplay_ui_mesh(
     selected_hotbar_slot: usize,
     cursor_stack: Option<ItemStack>,
     cursor_point: UiPoint,
+    _hovered_stack: Option<ItemStack>,
 ) -> (Vec<Vertex>, Vec<u32>) {
     let mut ui = UiMeshBuilder::default();
     if inventory_open {
         draw_inventory_panel(&mut ui, crafting_kind, aspect);
         for index in 0..crafting_grid.slot_count() {
-            draw_inventory_slot(
-                &mut ui,
-                crafting_input_slot_rect(index, crafting_kind, aspect),
-                false,
-            );
+            let rect = crafting_input_slot_rect(index, crafting_kind, aspect);
+            draw_inventory_slot(&mut ui, rect, false, rect.contains(cursor_point));
         }
+        let result_rect = crafting_result_slot_rect(crafting_kind, aspect);
         draw_inventory_slot(
             &mut ui,
-            crafting_result_slot_rect(crafting_kind, aspect),
+            result_rect,
             crafting_result.is_some(),
+            result_rect.contains(cursor_point),
         );
         draw_crafting_arrow(&mut ui, crafting_kind, aspect);
         for index in 0..world.player_inventory.slots().len() {
             let rect = inventory_slot_rect(index, true, aspect);
-            draw_inventory_slot(&mut ui, rect, index == selected_hotbar_slot);
+            draw_inventory_slot(
+                &mut ui,
+                rect,
+                index == selected_hotbar_slot,
+                rect.contains(cursor_point),
+            );
         }
     } else {
         for index in 0..INVENTORY_HOTBAR_SLOTS {
-            draw_inventory_slot(
-                &mut ui,
-                inventory_slot_rect(index, false, aspect),
-                index == selected_hotbar_slot,
-            );
+            let rect = inventory_slot_rect(index, false, aspect);
+            draw_inventory_slot(&mut ui, rect, index == selected_hotbar_slot, false);
         }
     }
 
@@ -108,6 +110,24 @@ pub(super) fn build_gameplay_ui_mesh(
     }
 
     ui.finish()
+}
+
+pub(super) fn build_inventory_tooltip_mesh(
+    world: &ClientWorld,
+    inventory_open: bool,
+    cursor_stack: Option<ItemStack>,
+    cursor_point: UiPoint,
+    hovered_stack: Option<ItemStack>,
+    aspect: f32,
+) -> Option<(Vec<Vertex>, Vec<u32>)> {
+    if !inventory_open || cursor_stack.is_some() {
+        return None;
+    }
+    let stack = hovered_stack?;
+    let item = world.items.get(stack.item)?;
+    let mut ui = UiMeshBuilder::default();
+    draw_tooltip(&mut ui, cursor_point, &item.display_name, aspect);
+    Some(ui.finish())
 }
 
 pub(super) fn build_inventory_icon_mesh(
@@ -364,22 +384,27 @@ pub(super) fn loot_billboard_corners(loot: &LootEntity) -> [Vec3; 4] {
     ]
 }
 
-fn draw_inventory_slot(ui: &mut UiMeshBuilder, rect: UiRect, selected: bool) {
+fn draw_inventory_slot(ui: &mut UiMeshBuilder, rect: UiRect, selected: bool, hovered: bool) {
     let pixel = slot_height(rect) / GUI_SLOT_SIZE;
     if selected {
         ui.rect(rect, [0.96, 0.96, 0.64]);
     }
+    if hovered {
+        ui.rect(rect, [1.00, 1.00, 1.00]);
+    }
     let outer = if selected {
+        inset_rect(rect, pixel)
+    } else if hovered {
         inset_rect(rect, pixel)
     } else {
         rect
     };
-    ui.rect(outer, [0.23, 0.23, 0.23]);
+    ui.rect(outer, [0.15, 0.15, 0.15]);
     let frame = inset_rect(outer, pixel);
-    ui.rect(frame, [0.62, 0.62, 0.62]);
+    ui.rect(frame, [0.59, 0.59, 0.59]);
     ui.rect(
         UiRect::new(frame.left, frame.bottom, frame.right, frame.bottom + pixel),
-        [0.36, 0.36, 0.36],
+        [0.31, 0.31, 0.31],
     );
     ui.rect(
         UiRect::new(
@@ -388,11 +413,11 @@ fn draw_inventory_slot(ui: &mut UiMeshBuilder, rect: UiRect, selected: bool) {
             frame.right,
             frame.top,
         ),
-        [0.36, 0.36, 0.36],
+        [0.31, 0.31, 0.31],
     );
     ui.rect(
         UiRect::new(frame.left, frame.top - pixel, frame.right, frame.top),
-        [0.90, 0.90, 0.90],
+        [0.88, 0.88, 0.88],
     );
     ui.rect(
         UiRect::new(
@@ -401,9 +426,9 @@ fn draw_inventory_slot(ui: &mut UiMeshBuilder, rect: UiRect, selected: bool) {
             frame.left + pixel / aspect_for_rect(rect),
             frame.top,
         ),
-        [0.90, 0.90, 0.90],
+        [0.88, 0.88, 0.88],
     );
-    ui.rect(inset_rect(frame, pixel * 2.0), [0.58, 0.58, 0.58]);
+    ui.rect(inset_rect(frame, pixel * 2.0), [0.54, 0.54, 0.54]);
 }
 
 fn aspect_for_rect(rect: UiRect) -> f32 {
@@ -439,6 +464,7 @@ fn draw_inventory_panel(ui: &mut UiMeshBuilder, kind: CraftingUiKind, aspect: f3
                     aspect,
                 ),
                 false,
+                false,
             );
         }
     }
@@ -468,16 +494,66 @@ fn draw_crafting_arrow(ui: &mut UiMeshBuilder, kind: CraftingUiKind, aspect: f32
 
 fn draw_stack_count(ui: &mut UiMeshBuilder, rect: UiRect, count: u16) {
     let text = count.to_string();
-    let x = rect.right - slot_width(rect) * 0.38;
-    let y = rect.bottom + slot_height(rect) * 0.30;
+    let x = rect.right - slot_width(rect) * (0.34 + text.len() as f32 * 0.10);
+    let y = rect.bottom + slot_height(rect) * 0.31;
+    let scale = 0.0049;
     ui.text(
         x + slot_width(rect) * 0.04,
-        y - slot_height(rect) * 0.05,
-        0.0038,
+        y - slot_height(rect) * 0.06,
+        scale,
         [0.08, 0.08, 0.08],
         &text,
     );
-    ui.text(x, y, 0.0038, [1.0, 1.0, 1.0], &text);
+    ui.text(x, y, scale, [1.0, 1.0, 1.0], &text);
+}
+
+fn draw_tooltip(ui: &mut UiMeshBuilder, cursor: UiPoint, text: &str, aspect: f32) {
+    let scale = 0.0052;
+    let width = (text.chars().count() as f32 * 6.0 * scale + 0.060 / aspect.max(0.1)).max(0.16);
+    let height = 0.070;
+    let mut left = cursor.x + 0.022 / aspect.max(0.1);
+    let mut top = cursor.y - 0.024;
+    if left + width > 0.98 {
+        left = 0.98 - width;
+    }
+    if top - height < -0.98 {
+        top = -0.98 + height;
+    }
+    let rect = UiRect::new(left, top - height, left + width, top);
+    ui.rect(rect, [0.05, 0.05, 0.05]);
+    ui.rect(
+        UiRect::new(rect.left, rect.top - 0.004, rect.right, rect.top),
+        [0.22, 0.22, 0.22],
+    );
+    ui.rect(
+        UiRect::new(rect.left, rect.bottom, rect.right, rect.bottom + 0.004),
+        [0.22, 0.22, 0.22],
+    );
+    ui.rect(
+        UiRect::new(
+            rect.left,
+            rect.bottom,
+            rect.left + 0.004 / aspect.max(0.1),
+            rect.top,
+        ),
+        [0.22, 0.22, 0.22],
+    );
+    ui.rect(
+        UiRect::new(
+            rect.right - 0.004 / aspect.max(0.1),
+            rect.bottom,
+            rect.right,
+            rect.top,
+        ),
+        [0.22, 0.22, 0.22],
+    );
+    ui.text(
+        rect.left + 0.026 / aspect.max(0.1),
+        rect.top - 0.024,
+        scale,
+        [1.0, 1.0, 1.0],
+        text,
+    );
 }
 
 pub(super) fn inventory_slot_rect(index: usize, inventory_open: bool, aspect: f32) -> UiRect {
@@ -610,15 +686,15 @@ fn inventory_icon_rect(rect: UiRect) -> UiRect {
     let width = slot_width(rect);
     let height = slot_height(rect);
     UiRect::new(
-        rect.left + width * 0.18,
-        rect.bottom + height * 0.34,
-        rect.right - width * 0.22,
-        rect.top - height * 0.12,
+        rect.left + width * 0.11,
+        rect.bottom + height * 0.20,
+        rect.right - width * 0.10,
+        rect.top - height * 0.08,
     )
 }
 
 fn carried_item_rect(point: UiPoint, aspect: f32) -> UiRect {
-    let height = 0.10;
+    let height = 0.12;
     let width = height / aspect.max(0.1);
     UiRect::new(
         point.x - width * 0.5,

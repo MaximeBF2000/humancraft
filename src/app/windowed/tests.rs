@@ -1,5 +1,5 @@
 use super::spatial::{split_world_block_position, world_block_from_render};
-use super::ui::UiRect;
+use super::ui::{UiPoint, UiRect, shortcut_hit_index, shortcut_row_rect};
 use super::*;
 use crate::content::{GameContent, bootstrap_content, default_generation_pipeline};
 use crate::engine::mesh::chunk_mesher::{FaceDirection, MeshQuad};
@@ -48,6 +48,38 @@ fn wasd_keys_are_not_treated_as_forward_left_on_azerty_bindings() {
 
     assert!(!input.forward);
     assert!(!input.left);
+}
+
+#[test]
+fn movement_uses_rebindable_shortcuts() {
+    let mut bindings = KeyBindings::default();
+    bindings.set_label(ShortcutAction::MoveForward, "W".to_string());
+    bindings.set_label(ShortcutAction::MoveLeft, "A".to_string());
+    let mut input = InputState::default();
+    let now = Instant::now();
+
+    input.handle_bound_key_at(Some("Z"), true, now, &bindings);
+    assert!(!input.forward);
+
+    input.handle_bound_key_at(Some("W"), true, now, &bindings);
+    input.handle_bound_key_at(Some("A"), true, now, &bindings);
+
+    assert!(input.forward);
+    assert!(input.left);
+}
+
+#[test]
+fn shortcut_rows_are_clickable_by_index() {
+    for index in [0, 5, 11, SHORTCUT_ACTIONS.len() - 1] {
+        let rect = shortcut_row_rect(index);
+        assert_eq!(
+            shortcut_hit_index(UiPoint {
+                x: rect.center_x(),
+                y: rect.center_y(),
+            }),
+            Some(index)
+        );
+    }
 }
 
 #[test]
@@ -649,6 +681,96 @@ fn inventory_drag_distributes_and_right_drag_places_one_per_slot() {
     assert_eq!(inventory.slot(0), Some(ItemStack::new(dirt, 4)));
     assert_eq!(inventory.slot(3), Some(ItemStack::new(dirt, 1)));
     assert_eq!(cursor, Some(ItemStack::new(dirt, 1)));
+}
+
+#[test]
+fn inventory_shift_click_transfers_between_hotbar_and_main_inventory() {
+    let content = bootstrap_content().unwrap();
+    let dirt = content.items.id_for_key("humancraft:dirt").unwrap();
+    let stone = content.items.id_for_key("humancraft:stone").unwrap();
+    let mut inventory = Inventory::player();
+    inventory.set_slot(0, Some(ItemStack::new(dirt, 12)));
+    inventory.set_slot(9, Some(ItemStack::new(dirt, 60)));
+    inventory.set_slot(10, Some(ItemStack::new(stone, 1)));
+
+    assert!(quick_transfer_player_slot(
+        &mut inventory,
+        0,
+        &content.items
+    ));
+    assert_eq!(inventory.slot(0), None);
+    assert_eq!(inventory.slot(9), Some(ItemStack::new(dirt, 64)));
+    assert_eq!(inventory.slot(11), Some(ItemStack::new(dirt, 8)));
+
+    assert!(quick_transfer_player_slot(
+        &mut inventory,
+        10,
+        &content.items
+    ));
+    assert_eq!(inventory.slot(0), Some(ItemStack::new(stone, 1)));
+    assert_eq!(inventory.slot(10), None);
+}
+
+#[test]
+fn inventory_double_click_collects_matching_visible_stacks_to_cursor() {
+    let content = bootstrap_content().unwrap();
+    let dirt = content.items.id_for_key("humancraft:dirt").unwrap();
+    let stone = content.items.id_for_key("humancraft:stone").unwrap();
+    let mut inventory = Inventory::new(4, 1);
+    let mut cursor = Some(ItemStack::new(dirt, 10));
+    inventory.set_slot(0, Some(ItemStack::new(stone, 5)));
+    inventory.set_slot(1, Some(ItemStack::new(dirt, 20)));
+    inventory.set_slot(2, Some(ItemStack::new(dirt, 40)));
+    inventory.set_slot(3, Some(ItemStack::new(dirt, 12)));
+
+    collect_matching_stacks(&mut inventory, &mut cursor, Some(2), &content.items);
+
+    assert_eq!(cursor, Some(ItemStack::new(dirt, 64)));
+    assert_eq!(inventory.slot(1), Some(ItemStack::new(dirt, 6)));
+    assert_eq!(inventory.slot(2), None);
+    assert_eq!(inventory.slot(3), Some(ItemStack::new(dirt, 12)));
+}
+
+#[test]
+fn inventory_hotbar_swap_and_drop_helpers_move_or_decrement_stacks() {
+    let content = bootstrap_content().unwrap();
+    let dirt = content.items.id_for_key("humancraft:dirt").unwrap();
+    let stone = content.items.id_for_key("humancraft:stone").unwrap();
+    let mut inventory = Inventory::player();
+    inventory.set_slot(0, Some(ItemStack::new(dirt, 3)));
+    inventory.set_slot(12, Some(ItemStack::new(stone, 8)));
+
+    assert!(swap_player_slots(&mut inventory, 12, 0));
+    assert_eq!(inventory.slot(0), Some(ItemStack::new(stone, 8)));
+    assert_eq!(inventory.slot(12), Some(ItemStack::new(dirt, 3)));
+
+    assert_eq!(
+        take_from_slot(&mut inventory, 12, false),
+        Some(ItemStack::new(dirt, 1))
+    );
+    assert_eq!(inventory.slot(12), Some(ItemStack::new(dirt, 2)));
+    assert_eq!(
+        take_from_slot(&mut inventory, 0, true),
+        Some(ItemStack::new(stone, 8))
+    );
+    assert_eq!(inventory.slot(0), None);
+}
+
+#[test]
+fn dropped_inventory_stack_spawns_near_player_with_forward_impulse() {
+    let content = bootstrap_content().unwrap();
+    let mut world = test_client_world(&content);
+    let dirt = world.items.id_for_key("humancraft:dirt").unwrap();
+    let player_eye = Vec3::new(8.0, 70.0, 8.0);
+    let forward = Vec3::new(0.0, 0.0, -1.0);
+
+    world.spawn_dropped_stack(ItemStack::new(dirt, 4), player_eye, forward);
+
+    assert_eq!(world.loot_entities.len(), 1);
+    assert_eq!(world.loot_entities[0].stack, ItemStack::new(dirt, 4));
+    assert!(world.loot_entities[0].position.z < player_eye.z);
+    assert!(world.loot_entities[0].velocity.z < 0.0);
+    assert!(world.loot_entities[0].velocity.y > 0.0);
 }
 
 #[test]

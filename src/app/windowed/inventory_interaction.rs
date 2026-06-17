@@ -9,27 +9,46 @@ pub(super) enum InventoryMouseButton {
     Right,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub(super) enum InventorySlotId {
+    Player(usize),
+    CraftingInput(usize),
+    CraftingResult,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct InventoryDrag {
     pub(super) button: InventoryMouseButton,
-    pub(super) start_slot: Option<usize>,
-    pub(super) slots: Vec<usize>,
+    pub(super) start_slot: Option<InventorySlotId>,
+    pub(super) slots: Vec<InventorySlotId>,
     pub(super) changed_slots: bool,
     pub(super) applied_drag: bool,
+    pub(super) start_cursor: Option<ItemStack>,
+    pub(super) start_player_slots: Vec<Option<ItemStack>>,
+    pub(super) start_crafting_slots: Vec<Option<ItemStack>>,
 }
 
 impl InventoryDrag {
-    pub(super) fn new(button: InventoryMouseButton, start_slot: Option<usize>) -> Self {
+    pub(super) fn new(
+        button: InventoryMouseButton,
+        start_slot: Option<InventorySlotId>,
+        cursor: Option<ItemStack>,
+        player_inventory: &Inventory,
+        crafting_grid: &Inventory,
+    ) -> Self {
         Self {
             button,
             start_slot,
             slots: Vec::new(),
             changed_slots: false,
             applied_drag: false,
+            start_cursor: cursor,
+            start_player_slots: player_inventory.slots().to_vec(),
+            start_crafting_slots: crafting_grid.slots().to_vec(),
         }
     }
 
-    pub(super) fn push_slot(&mut self, slot: usize) -> bool {
+    pub(super) fn push_slot(&mut self, slot: InventorySlotId) -> bool {
         if self.slots.contains(&slot) {
             return false;
         }
@@ -159,6 +178,168 @@ pub(super) fn distribute_carried_stack_evenly(
             return;
         }
     }
+}
+
+pub(super) fn collect_matching_stacks(
+    inventory: &mut Inventory,
+    cursor: &mut Option<ItemStack>,
+    hovered_slot: Option<usize>,
+    items: &ItemRegistry,
+) {
+    let Some(mut held) = *cursor else {
+        return;
+    };
+    let max_stack_size = max_stack_size(held.item, items);
+    if held.count >= max_stack_size {
+        return;
+    }
+
+    if let Some(slot) = hovered_slot {
+        collect_from_slot(inventory, &mut held, slot, max_stack_size);
+    }
+    for slot in 0..inventory.slot_count() {
+        if held.count >= max_stack_size {
+            break;
+        }
+        if Some(slot) == hovered_slot {
+            continue;
+        }
+        collect_from_slot(inventory, &mut held, slot, max_stack_size);
+    }
+    *cursor = Some(held);
+}
+
+fn collect_from_slot(
+    inventory: &mut Inventory,
+    held: &mut ItemStack,
+    slot_index: usize,
+    max_stack_size: u16,
+) {
+    let Some(mut stack) = inventory.slot(slot_index) else {
+        return;
+    };
+    if stack.item != held.item {
+        return;
+    }
+    let moved = stack.count.min(max_stack_size.saturating_sub(held.count));
+    if moved == 0 {
+        return;
+    }
+    held.count += moved;
+    stack.count -= moved;
+    inventory.set_slot(
+        slot_index,
+        if stack.count == 0 { None } else { Some(stack) },
+    );
+}
+
+pub(super) fn quick_transfer_player_slot(
+    inventory: &mut Inventory,
+    slot_index: usize,
+    items: &ItemRegistry,
+) -> bool {
+    let Some(stack) = inventory.slot(slot_index) else {
+        return false;
+    };
+    inventory.set_slot(slot_index, None);
+    let target_slots = if slot_index < INVENTORY_HOTBAR_SLOTS {
+        INVENTORY_HOTBAR_SLOTS..inventory.slot_count()
+    } else {
+        0..INVENTORY_HOTBAR_SLOTS
+    };
+    let remainder = move_stack_into_slots(inventory, stack, target_slots, items);
+    inventory.set_slot(slot_index, remainder);
+    remainder != Some(stack)
+}
+
+pub(super) fn move_stack_into_player_inventory(
+    inventory: &mut Inventory,
+    stack: ItemStack,
+    items: &ItemRegistry,
+) -> Option<ItemStack> {
+    move_stack_into_slots(inventory, stack, 0..inventory.slot_count(), items)
+}
+
+fn move_stack_into_slots(
+    inventory: &mut Inventory,
+    mut stack: ItemStack,
+    slots: std::ops::Range<usize>,
+    items: &ItemRegistry,
+) -> Option<ItemStack> {
+    if stack.is_empty() {
+        return None;
+    }
+    let max_stack_size = max_stack_size(stack.item, items);
+
+    for slot_index in slots.clone() {
+        let Some(mut existing) = inventory.slot(slot_index) else {
+            continue;
+        };
+        if existing.item != stack.item || existing.count >= max_stack_size {
+            continue;
+        }
+        let moved = stack.count.min(max_stack_size - existing.count);
+        existing.count += moved;
+        stack.count -= moved;
+        inventory.set_slot(slot_index, Some(existing));
+        if stack.count == 0 {
+            return None;
+        }
+    }
+
+    for slot_index in slots {
+        if inventory.slot(slot_index).is_some() {
+            continue;
+        }
+        let moved = stack.count.min(max_stack_size);
+        inventory.set_slot(slot_index, Some(ItemStack::new(stack.item, moved)));
+        stack.count -= moved;
+        if stack.count == 0 {
+            return None;
+        }
+    }
+
+    Some(stack)
+}
+
+pub(super) fn swap_player_slots(inventory: &mut Inventory, left: usize, right: usize) -> bool {
+    if left == right {
+        return false;
+    }
+    let left_stack = inventory.slot(left);
+    let right_stack = inventory.slot(right);
+    inventory.set_slot(left, right_stack);
+    inventory.set_slot(right, left_stack);
+    left_stack != right_stack
+}
+
+pub(super) fn take_from_slot(
+    inventory: &mut Inventory,
+    slot_index: usize,
+    full_stack: bool,
+) -> Option<ItemStack> {
+    let mut stack = inventory.slot(slot_index)?;
+    if full_stack || stack.count == 1 {
+        inventory.set_slot(slot_index, None);
+        return Some(stack);
+    }
+    stack.count -= 1;
+    inventory.set_slot(slot_index, Some(stack));
+    Some(ItemStack::new(stack.item, 1))
+}
+
+pub(super) fn take_from_cursor(
+    cursor: &mut Option<ItemStack>,
+    full_stack: bool,
+) -> Option<ItemStack> {
+    let mut stack = (*cursor)?;
+    if full_stack || stack.count == 1 {
+        *cursor = None;
+        return Some(stack);
+    }
+    stack.count -= 1;
+    *cursor = Some(stack);
+    Some(ItemStack::new(stack.item, 1))
 }
 
 fn can_accept_item(slot: Option<ItemStack>, item: ItemId, items: &ItemRegistry) -> bool {

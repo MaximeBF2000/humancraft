@@ -12,7 +12,7 @@ use winit::application::ApplicationHandler;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{DeviceEvent, ElementState, Ime, KeyEvent, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::keyboard::{Key, NamedKey};
+use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowAttributes, WindowId};
 
 use crate::content::{bootstrap_content, default_generation_pipeline};
@@ -53,13 +53,16 @@ use constants::*;
 use hud::{build_crosshair_mesh, build_outline_vertices};
 use input::InputState;
 use inventory_interaction::{
-    InventoryDrag, InventoryMouseButton, distribute_carried_stack_evenly, inventory_from_save,
-    inventory_to_save, left_click_inventory_slot, place_one_carried_item,
-    right_click_inventory_slot,
+    InventoryDrag, InventoryMouseButton, InventorySlotId, collect_matching_stacks,
+    distribute_carried_stack_evenly, inventory_from_save, inventory_to_save,
+    left_click_inventory_slot, move_stack_into_player_inventory, place_one_carried_item,
+    quick_transfer_player_slot, right_click_inventory_slot, swap_player_slots, take_from_cursor,
+    take_from_slot,
 };
 use inventory_ui::{
-    CraftingUiKind, build_gameplay_ui_mesh, build_inventory_icon_mesh, build_loot_mesh,
-    crafting_input_slot_at_point, crafting_result_slot_at_point, inventory_slot_at_point,
+    CraftingUiKind, build_gameplay_ui_mesh, build_inventory_icon_mesh,
+    build_inventory_tooltip_mesh, build_loot_mesh, crafting_input_slot_at_point,
+    crafting_result_slot_at_point, inventory_slot_at_point,
 };
 #[cfg(test)]
 use inventory_ui::{
@@ -68,7 +71,10 @@ use inventory_ui::{
     slot_height, slot_width,
 };
 use render_types::{CameraUniform, Vertex};
-use session::{AppMode, ConfigField, HeldBlockInteraction, NewWorldConfig, TextEntry};
+use session::{
+    AppMode, ConfigField, HeldBlockInteraction, KeyBindings, NewWorldConfig, SHORTCUT_ACTIONS,
+    ShortcutAction, TextEntry,
+};
 use spatial::{WorldBlockPosition, chunk_position_for_render_position};
 use texture::{Texture, TextureAtlas};
 #[cfg(test)]
@@ -78,9 +84,10 @@ use texture::{
 };
 use ui::{
     UI_CONFIG_BACK, UI_CONFIG_CREATE, UI_CONFIG_NAME_FIELD, UI_CONFIG_SEED_FIELD, UI_MAIN_PLAY,
-    UI_PAUSE_KEEP_PLAYING, UI_PAUSE_SAVE_QUIT, UI_RENAME_BACK, UI_RENAME_SAVE, UI_WORLDS_BACK,
+    UI_MAIN_SETTINGS, UI_PAUSE_KEEP_PLAYING, UI_PAUSE_SAVE_QUIT, UI_PAUSE_SETTINGS, UI_RENAME_BACK,
+    UI_RENAME_SAVE, UI_SETTINGS_BACK, UI_SETTINGS_SHORTCUTS, UI_SHORTCUTS_BACK, UI_WORLDS_BACK,
     UI_WORLDS_DELETE, UI_WORLDS_NEW, UI_WORLDS_PLAY, UI_WORLDS_RENAME, build_menu_mesh,
-    cursor_to_ui_point, world_list_hit_index,
+    cursor_to_ui_point, shortcut_hit_index, world_list_hit_index,
 };
 use world_render::{ChunkRenderBuffer, build_chunk_render_buffers, unique_loaded_chunk_positions};
 #[cfg(test)]
@@ -139,6 +146,7 @@ impl ApplicationHandler for WindowedApp {
                     return;
                 }
             }
+            WindowEvent::ModifiersChanged(modifiers) => state.handle_modifiers(modifiers.state()),
             WindowEvent::Ime(Ime::Commit(text)) => state.handle_text_input(&text),
             WindowEvent::CursorMoved { position, .. } => state.handle_cursor_moved(position),
             WindowEvent::MouseInput {
@@ -221,6 +229,9 @@ struct RenderState {
     selected_world: usize,
     text_entry: TextEntry,
     new_world_config: NewWorldConfig,
+    key_bindings: KeyBindings,
+    settings_return_to_pause: bool,
+    rebinding_shortcut: Option<ShortcutAction>,
     dirty_save_chunks: HashSet<ChunkPosition>,
     player_state_dirty: bool,
     cursor_position: PhysicalPosition<f64>,
@@ -234,6 +245,9 @@ struct RenderState {
     crafting_result: Option<ItemStack>,
     inventory_cursor: Option<ItemStack>,
     inventory_drag: Option<InventoryDrag>,
+    last_inventory_click: Option<(Instant, InventoryMouseButton, crate::engine::world::ItemId)>,
+    modifier_shift: bool,
+    modifier_control: bool,
     held_block_interaction: HeldBlockInteraction,
     selected_hotbar_slot: usize,
     last_frame: Instant,
@@ -656,6 +670,9 @@ impl RenderState {
             selected_world: 0,
             text_entry: TextEntry::default(),
             new_world_config: NewWorldConfig::default(),
+            key_bindings: KeyBindings::default(),
+            settings_return_to_pause: false,
+            rebinding_shortcut: None,
             dirty_save_chunks: HashSet::new(),
             player_state_dirty: false,
             cursor_position: PhysicalPosition::new(0.0, 0.0),
@@ -669,6 +686,9 @@ impl RenderState {
             crafting_result: None,
             inventory_cursor: None,
             inventory_drag: None,
+            last_inventory_click: None,
+            modifier_shift: false,
+            modifier_control: false,
             held_block_interaction: HeldBlockInteraction::default(),
             selected_hotbar_slot: 0,
             last_frame: Instant::now(),
@@ -710,8 +730,40 @@ fn character_key(event: &KeyEvent, expected: &str) -> bool {
     matches!(event.logical_key.as_ref(), Key::Character(character) if character.eq_ignore_ascii_case(expected))
 }
 
-fn is_inventory_key(event: &KeyEvent) -> bool {
-    event.state == ElementState::Pressed && character_key(event, DEFAULT_INVENTORY_KEY)
+fn shortcut_label_for_event(event: &KeyEvent) -> Option<String> {
+    match event.logical_key.as_ref() {
+        Key::Character(character) => {
+            let mut chars = character.chars();
+            let first = chars.next()?;
+            if chars.next().is_none() && !first.is_control() {
+                Some(first.to_ascii_uppercase().to_string())
+            } else {
+                None
+            }
+        }
+        Key::Named(NamedKey::Space) => Some("SPACE".to_string()),
+        Key::Named(NamedKey::Shift) => Some("SHIFT".to_string()),
+        Key::Named(NamedKey::Control) => Some("CTRL".to_string()),
+        Key::Named(NamedKey::Escape) => Some("ESC".to_string()),
+        Key::Named(NamedKey::ArrowLeft) => Some("LEFT".to_string()),
+        Key::Named(NamedKey::ArrowRight) => Some("RIGHT".to_string()),
+        Key::Named(NamedKey::ArrowUp) => Some("UP".to_string()),
+        Key::Named(NamedKey::ArrowDown) => Some("DOWN".to_string()),
+        Key::Named(NamedKey::Enter) => Some("ENTER".to_string()),
+        Key::Named(NamedKey::Tab) => Some("TAB".to_string()),
+        Key::Named(NamedKey::Backspace) => Some("BACKSPACE".to_string()),
+        Key::Named(NamedKey::Delete) => Some("DELETE".to_string()),
+        _ => match event.physical_key {
+            PhysicalKey::Code(KeyCode::Space) => Some("SPACE".to_string()),
+            PhysicalKey::Code(KeyCode::ShiftLeft | KeyCode::ShiftRight) => {
+                Some("SHIFT".to_string())
+            }
+            PhysicalKey::Code(KeyCode::ControlLeft | KeyCode::ControlRight) => {
+                Some("CTRL".to_string())
+            }
+            _ => None,
+        },
+    }
 }
 
 fn inventory_mouse_button(button: MouseButton) -> Option<InventoryMouseButton> {

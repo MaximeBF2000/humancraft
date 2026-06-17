@@ -4,6 +4,7 @@ use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey};
 
 use super::constants::SPRINT_DOUBLE_TAP_SECONDS;
+use super::session::{KeyBindings, ShortcutAction};
 
 #[derive(Debug, Default)]
 pub(super) struct InputState {
@@ -18,19 +19,28 @@ pub(super) struct InputState {
 }
 
 impl InputState {
-    pub(super) fn handle_key(&mut self, event: &KeyEvent) {
+    pub(super) fn handle_key(&mut self, event: &KeyEvent, bindings: &KeyBindings) {
         let pressed = event.state == ElementState::Pressed;
-        self.handle_logical_key_at(event.logical_key.as_ref(), pressed, Instant::now());
+        let label = super::shortcut_label_for_event(event);
+        self.handle_bound_key_at(label.as_deref(), pressed, Instant::now(), bindings);
 
         if let PhysicalKey::Code(code) = event.physical_key {
             match code {
-                KeyCode::Space => self.jump = pressed,
-                KeyCode::ShiftLeft | KeyCode::ShiftRight => self.sneak = pressed,
+                KeyCode::Space if bindings.matches(ShortcutAction::Jump, "SPACE") => {
+                    self.jump = pressed;
+                }
+                KeyCode::ShiftLeft | KeyCode::ShiftRight
+                    if bindings.matches(ShortcutAction::Sneak, "SHIFT") =>
+                {
+                    self.sneak = pressed;
+                }
                 _ => {}
             }
         }
 
-        if matches!(event.logical_key.as_ref(), Key::Named(NamedKey::Shift)) {
+        if matches!(event.logical_key.as_ref(), Key::Named(NamedKey::Shift))
+            && bindings.matches(ShortcutAction::Sneak, "SHIFT")
+        {
             self.sneak = pressed;
         }
     }
@@ -40,6 +50,7 @@ impl InputState {
         self.handle_logical_key_at(key, pressed, Instant::now());
     }
 
+    #[cfg(test)]
     pub(super) fn handle_logical_key_at(&mut self, key: Key<&str>, pressed: bool, now: Instant) {
         match key {
             Key::Character(character) => match character.to_lowercase().as_str() {
@@ -62,6 +73,41 @@ impl InputState {
                 _ => {}
             },
             _ => {}
+        }
+    }
+
+    pub(super) fn handle_bound_key_at(
+        &mut self,
+        label: Option<&str>,
+        pressed: bool,
+        now: Instant,
+        bindings: &KeyBindings,
+    ) {
+        let Some(label) = label else {
+            return;
+        };
+        if bindings.matches(ShortcutAction::MoveForward, label) {
+            if pressed && !self.forward {
+                if self.last_forward_press.is_some_and(|last| {
+                    now.duration_since(last).as_secs_f32() <= SPRINT_DOUBLE_TAP_SECONDS
+                }) {
+                    self.sprint = true;
+                }
+                self.last_forward_press = Some(now);
+            } else if !pressed {
+                self.sprint = false;
+            }
+            self.forward = pressed;
+        } else if bindings.matches(ShortcutAction::MoveBackward, label) {
+            self.backward = pressed;
+        } else if bindings.matches(ShortcutAction::MoveLeft, label) {
+            self.left = pressed;
+        } else if bindings.matches(ShortcutAction::MoveRight, label) {
+            self.right = pressed;
+        } else if bindings.matches(ShortcutAction::Jump, label) {
+            self.jump = pressed;
+        } else if bindings.matches(ShortcutAction::Sneak, label) {
+            self.sneak = pressed;
         }
     }
 

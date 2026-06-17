@@ -104,6 +104,7 @@ impl RenderState {
         let aspect = self.config.width.max(1) as f32 / self.config.height.max(1) as f32;
         let ui_mesh = if self.mode == AppMode::InGame && !self.paused {
             self.world.as_ref().map(|world| {
+                let cursor_point = cursor_to_ui_point(self.cursor_position, self.size);
                 build_gameplay_ui_mesh(
                     world,
                     self.inventory_open,
@@ -113,7 +114,8 @@ impl RenderState {
                     aspect,
                     self.selected_hotbar_slot,
                     self.inventory_cursor,
-                    cursor_to_ui_point(self.cursor_position, self.size),
+                    cursor_point,
+                    self.hovered_inventory_stack(),
                 )
             })
         } else if self.mode != AppMode::InGame || self.paused {
@@ -134,6 +136,20 @@ impl RenderState {
                     self.selected_hotbar_slot,
                     self.inventory_cursor,
                     cursor_to_ui_point(self.cursor_position, self.size),
+                )
+            })
+        } else {
+            None
+        };
+        let tooltip_mesh = if self.mode == AppMode::InGame && !self.paused {
+            self.world.as_ref().and_then(|world| {
+                build_inventory_tooltip_mesh(
+                    world,
+                    self.inventory_open,
+                    self.inventory_cursor,
+                    cursor_to_ui_point(self.cursor_position, self.size),
+                    self.hovered_inventory_stack(),
+                    aspect,
                 )
             })
         } else {
@@ -181,6 +197,26 @@ impl RenderState {
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("Dynamic Textured UI Index Buffer"),
+                    contents: bytemuck::cast_slice(indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
+            Some((vertex_buffer, index_buffer, indices.len() as u32))
+        });
+        let tooltip_buffers = tooltip_mesh.as_ref().and_then(|(vertices, indices)| {
+            if vertices.is_empty() || indices.is_empty() {
+                return None;
+            }
+            let vertex_buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Dynamic Tooltip Vertex Buffer"),
+                    contents: bytemuck::cast_slice(vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+            let index_buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Dynamic Tooltip Index Buffer"),
                     contents: bytemuck::cast_slice(indices),
                     usage: wgpu::BufferUsages::INDEX,
                 });
@@ -306,6 +342,13 @@ impl RenderState {
             if let Some((vertex_buffer, index_buffer, index_count)) = &textured_ui_buffers {
                 pass.set_pipeline(&self.textured_ui_pipeline);
                 pass.set_bind_group(0, &self.texture_bind_group, &[]);
+                pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..*index_count, 0, 0..1);
+            }
+
+            if let Some((vertex_buffer, index_buffer, index_count)) = &tooltip_buffers {
+                pass.set_pipeline(&self.ui_pipeline);
                 pass.set_vertex_buffer(0, vertex_buffer.slice(..));
                 pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..*index_count, 0, 0..1);

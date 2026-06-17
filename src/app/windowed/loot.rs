@@ -11,6 +11,19 @@ use super::constants::{
 use super::spatial::{WorldBlockPosition, render_position_for_world_block_center};
 
 impl ClientWorld {
+    pub(super) fn spawn_dropped_stack(&mut self, stack: ItemStack, position: Vec3, forward: Vec3) {
+        if stack.is_empty() {
+            return;
+        }
+        let flat_forward = Vec3::new(forward.x, 0.0, forward.z)
+            .try_normalize()
+            .unwrap_or(Vec3::Z);
+        let spawn_position = position + flat_forward * 0.45 - Vec3::Y * 0.35;
+        let velocity = flat_forward * 0.12 + Vec3::Y * 0.16;
+        self.loot_entities
+            .push(LootEntity::new(stack, spawn_position).with_velocity(velocity));
+    }
+
     pub(super) fn spawn_loot_for_block(&mut self, block: BlockId, position: WorldBlockPosition) {
         let Some(definition) = self.blocks.get(block) else {
             return;

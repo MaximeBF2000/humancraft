@@ -33,4 +33,3 @@ pub(super) const LOOT_GROUND_DRAG: f32 = 0.6;
 pub(super) const LOOT_PICKUP_RADIUS: f32 = 1.35;
 pub(super) const LOOT_ROTATION_RADIANS_PER_SECOND: f32 = std::f32::consts::TAU;
 pub(super) const LOOT_RENDER_HALF_SIZE: f32 = 0.22;
-pub(super) const DEFAULT_INVENTORY_KEY: &str = "e";

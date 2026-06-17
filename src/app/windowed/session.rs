@@ -8,7 +8,156 @@ pub(super) enum AppMode {
     ManageWorlds,
     ConfigNewWorld,
     RenamingWorld,
+    Settings,
+    Shortcuts,
     InGame,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub(super) enum ShortcutAction {
+    MoveForward,
+    MoveBackward,
+    MoveLeft,
+    MoveRight,
+    Jump,
+    Sneak,
+    Inventory,
+    Pause,
+    Drop,
+    HotbarPrevious,
+    HotbarNext,
+    Hotbar1,
+    Hotbar2,
+    Hotbar3,
+    Hotbar4,
+    Hotbar5,
+    Hotbar6,
+    Hotbar7,
+    Hotbar8,
+    Hotbar9,
+}
+
+pub(super) const SHORTCUT_ACTIONS: [ShortcutAction; 20] = [
+    ShortcutAction::MoveForward,
+    ShortcutAction::MoveBackward,
+    ShortcutAction::MoveLeft,
+    ShortcutAction::MoveRight,
+    ShortcutAction::Jump,
+    ShortcutAction::Sneak,
+    ShortcutAction::Inventory,
+    ShortcutAction::Pause,
+    ShortcutAction::Drop,
+    ShortcutAction::HotbarPrevious,
+    ShortcutAction::HotbarNext,
+    ShortcutAction::Hotbar1,
+    ShortcutAction::Hotbar2,
+    ShortcutAction::Hotbar3,
+    ShortcutAction::Hotbar4,
+    ShortcutAction::Hotbar5,
+    ShortcutAction::Hotbar6,
+    ShortcutAction::Hotbar7,
+    ShortcutAction::Hotbar8,
+    ShortcutAction::Hotbar9,
+];
+
+impl ShortcutAction {
+    pub(super) const fn label(self) -> &'static str {
+        match self {
+            Self::MoveForward => "MOVE FORWARD",
+            Self::MoveBackward => "MOVE BACKWARD",
+            Self::MoveLeft => "MOVE LEFT",
+            Self::MoveRight => "MOVE RIGHT",
+            Self::Jump => "JUMP",
+            Self::Sneak => "CROUCH",
+            Self::Inventory => "INVENTORY",
+            Self::Pause => "PAUSE",
+            Self::Drop => "DROP ITEM",
+            Self::HotbarPrevious => "HOTBAR PREV",
+            Self::HotbarNext => "HOTBAR NEXT",
+            Self::Hotbar1 => "HOTBAR 1",
+            Self::Hotbar2 => "HOTBAR 2",
+            Self::Hotbar3 => "HOTBAR 3",
+            Self::Hotbar4 => "HOTBAR 4",
+            Self::Hotbar5 => "HOTBAR 5",
+            Self::Hotbar6 => "HOTBAR 6",
+            Self::Hotbar7 => "HOTBAR 7",
+            Self::Hotbar8 => "HOTBAR 8",
+            Self::Hotbar9 => "HOTBAR 9",
+        }
+    }
+
+    const fn index(self) -> usize {
+        match self {
+            Self::MoveForward => 0,
+            Self::MoveBackward => 1,
+            Self::MoveLeft => 2,
+            Self::MoveRight => 3,
+            Self::Jump => 4,
+            Self::Sneak => 5,
+            Self::Inventory => 6,
+            Self::Pause => 7,
+            Self::Drop => 8,
+            Self::HotbarPrevious => 9,
+            Self::HotbarNext => 10,
+            Self::Hotbar1 => 11,
+            Self::Hotbar2 => 12,
+            Self::Hotbar3 => 13,
+            Self::Hotbar4 => 14,
+            Self::Hotbar5 => 15,
+            Self::Hotbar6 => 16,
+            Self::Hotbar7 => 17,
+            Self::Hotbar8 => 18,
+            Self::Hotbar9 => 19,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct KeyBindings {
+    labels: [String; SHORTCUT_ACTIONS.len()],
+}
+
+impl Default for KeyBindings {
+    fn default() -> Self {
+        Self {
+            labels: [
+                "Z".to_string(),
+                "S".to_string(),
+                "Q".to_string(),
+                "D".to_string(),
+                "SPACE".to_string(),
+                "SHIFT".to_string(),
+                "E".to_string(),
+                "ESC".to_string(),
+                "Q".to_string(),
+                "LEFT".to_string(),
+                "RIGHT".to_string(),
+                "1".to_string(),
+                "2".to_string(),
+                "3".to_string(),
+                "4".to_string(),
+                "5".to_string(),
+                "6".to_string(),
+                "7".to_string(),
+                "8".to_string(),
+                "9".to_string(),
+            ],
+        }
+    }
+}
+
+impl KeyBindings {
+    pub(super) fn label(&self, action: ShortcutAction) -> &str {
+        &self.labels[action.index()]
+    }
+
+    pub(super) fn set_label(&mut self, action: ShortcutAction, label: String) {
+        self.labels[action.index()] = label;
+    }
+
+    pub(super) fn matches(&self, action: ShortcutAction, label: &str) -> bool {
+        self.label(action).eq_ignore_ascii_case(label)
+    }
 }
 
 #[derive(Debug, Default, Copy, Clone)]

@@ -17,6 +17,8 @@ World management controls:
 - Arrow keys: change selected world
 - New world config: edit world name and seed on the same screen. `Tab` switches
   fields, `Enter` creates the world, and a blank seed uses an automatic seed.
+- Main menu Settings: open the shortcuts screen and click an action row, then
+  press a key to change that shortcut for the current session.
 
 In-game controls:
 
@@ -40,7 +42,8 @@ In-game controls:
 - `E`: open or close the inventory overlay
 - `Esc`: open the pause overlay. `Keep Playing` resumes. `Save & Quit` flushes
   player state, inventory, and edited chunks to disk, then returns to the main
-  menu.
+  menu. The pause overlay also has Settings for changing shortcuts during the
+  current session.
 
 The hotbar is always visible at the bottom of the gameplay view. It shows the
 first nine inventory slots and item stack counts. One slot is selected at a
@@ -69,11 +72,28 @@ Inventory and crafting overlay controls:
 - Right click a stack: pick up half of it, rounding up.
 - Right click with a carried stack: place one item into an empty or matching
   slot.
+- Shift-left click a player inventory or hotbar stack: quick-transfer it
+  between the hotbar and the main inventory, filling matching stacks first.
 - Left click a crafting result: take the result and consume one set of
   ingredients from the crafting grid.
+- Shift-left click a crafting result: craft as many results as possible into
+  the player inventory.
 - Left drag with a carried stack: distribute items evenly over compatible
-  slots.
-- Right drag with a carried stack: place one item in each compatible slot.
+  player or crafting slots. Slot counts update while dragging.
+- Right drag with a carried stack: place one item in each compatible player or
+  crafting slot.
+- Double-left click while carrying a stack: collect matching visible stacks into
+  the carried stack up to the item's stack limit.
+- Number keys `1` through `9` while hovering a slot: swap that slot with the
+  matching hotbar slot.
+- `Q`: drop one item from the carried stack, or from the hovered slot if the
+  cursor is empty.
+- `Ctrl+Q`: drop the full carried stack or hovered slot stack.
+- Hovering an item shows its display name in a tooltip.
+- Clicking outside the inventory while carrying a stack drops it near the
+  player with a small forward toss.
+- Press the drop shortcut during gameplay to drop one item from the selected
+  hotbar slot, or hold `Ctrl` with it to drop the full selected stack.
 
 Breaking a block drops its configured loot into the world as a Y-axis rotating
 item entity. Walk close to the dropped item to pick it up. The item is added to
