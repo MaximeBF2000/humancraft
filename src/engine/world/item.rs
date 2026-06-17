@@ -28,7 +28,7 @@ impl From<ItemId> for usize {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ItemDefinition {
     pub key: String,
     pub display_name: String,
@@ -36,6 +36,7 @@ pub struct ItemDefinition {
     pub place_block: Option<String>,
     pub texture: String,
     pub tags: Vec<String>,
+    pub tool: Option<ToolDefinition>,
 }
 
 impl ItemDefinition {
@@ -47,6 +48,7 @@ impl ItemDefinition {
             place_block: None,
             texture: "humancraft:missing".to_string(),
             tags: Vec::new(),
+            tool: None,
         }
     }
 
@@ -69,6 +71,11 @@ impl ItemDefinition {
         self.tags = tags.into_iter().map(Into::into).collect();
         self
     }
+
+    pub fn tool(mut self, tool: ToolDefinition) -> Self {
+        self.tool = Some(tool);
+        self
+    }
 }
 
 impl Definition for ItemDefinition {
@@ -78,6 +85,60 @@ impl Definition for ItemDefinition {
 }
 
 pub type ItemRegistry = Registry<ItemId, ItemDefinition>;
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum ToolKind {
+    Pickaxe,
+    Shovel,
+    Axe,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum ToolMaterial {
+    Wood,
+    Stone,
+    Iron,
+    Diamond,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct ToolDefinition {
+    pub kind: ToolKind,
+    pub material: ToolMaterial,
+    pub harvest_level: u8,
+    pub speed_multiplier: f32,
+}
+
+impl ToolDefinition {
+    pub const fn new(kind: ToolKind, material: ToolMaterial) -> Self {
+        Self {
+            kind,
+            material,
+            harvest_level: material.harvest_level(),
+            speed_multiplier: material.speed_multiplier(),
+        }
+    }
+}
+
+impl ToolMaterial {
+    pub const fn harvest_level(self) -> u8 {
+        match self {
+            Self::Wood => 1,
+            Self::Stone => 2,
+            Self::Iron => 3,
+            Self::Diamond => 4,
+        }
+    }
+
+    pub const fn speed_multiplier(self) -> f32 {
+        match self {
+            Self::Wood => 2.0,
+            Self::Stone => 4.0,
+            Self::Iron => 6.0,
+            Self::Diamond => 8.0,
+        }
+    }
+}
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct ItemStack {

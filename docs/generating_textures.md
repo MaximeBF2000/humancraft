@@ -63,6 +63,16 @@ For non-block items, copy the matching original sprite from `textures/items`.
 Examples: `coal.png`, `diamond.png`, `iron_ingot.png`, `gold_ingot.png`, and
 `sapling_oak.png`.
 
+Tools should also use the original item sprites when available. Current
+HumanCraft tool textures are copied from the default pack for:
+
+- `stick.png`
+- `wood_pickaxe.png`, `stone_pickaxe.png`, `iron_pickaxe.png`,
+  `diamond_pickaxe.png`
+- `wood_shovel.png`, `stone_shovel.png`, `iron_shovel.png`,
+  `diamond_shovel.png`
+- `wood_axe.png`, `stone_axe.png`, `iron_axe.png`, `diamond_axe.png`
+
 For block items, keep `textures/items/<block>.png` available for atlas coverage,
 but render inventory icons as block meshes when possible. The UI should sample
 the block's own south/east/top textures so item icons stay consistent with

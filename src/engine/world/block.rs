@@ -8,6 +8,7 @@
 //! lighting, and drops consume properties from this registry.
 
 use crate::engine::registry::{Definition, Registry};
+use crate::engine::world::ToolKind;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct BlockId(usize);
@@ -40,6 +41,8 @@ pub struct BlockDefinition {
     pub drops: Vec<String>,
     pub tags: Vec<String>,
     pub textures: BlockTextures,
+    pub effective_tool: Option<ToolKind>,
+    pub harvest_requirement: Option<BlockHarvestRequirement>,
 }
 
 impl BlockDefinition {
@@ -53,6 +56,8 @@ impl BlockDefinition {
             drops: Vec::new(),
             tags: Vec::new(),
             textures: BlockTextures::missing(),
+            effective_tool: None,
+            harvest_requirement: None,
         }
     }
 
@@ -86,6 +91,16 @@ impl BlockDefinition {
         self
     }
 
+    pub fn effective_tool(mut self, tool: ToolKind) -> Self {
+        self.effective_tool = Some(tool);
+        self
+    }
+
+    pub fn harvest_requirement(mut self, tool: ToolKind, min_level: u8) -> Self {
+        self.harvest_requirement = Some(BlockHarvestRequirement { tool, min_level });
+        self
+    }
+
     pub fn has_tag(&self, tag: &str) -> bool {
         self.tags.iter().any(|candidate| candidate == tag)
     }
@@ -98,6 +113,12 @@ impl Definition for BlockDefinition {
 }
 
 pub type BlockRegistry = Registry<BlockId, BlockDefinition>;
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct BlockHarvestRequirement {
+    pub tool: ToolKind,
+    pub min_level: u8,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockTextures {

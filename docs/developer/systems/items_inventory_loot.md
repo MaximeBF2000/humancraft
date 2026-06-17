@@ -8,6 +8,9 @@ item IDs and stack counts, not concrete content types.
 ## Current Data Model
 
 - `ItemDefinition` lives in `src/engine/world/item.rs`.
+- Tools are item definitions with optional `ToolDefinition` metadata. The
+  metadata records tool kind, material, harvest level, and vanilla-style speed
+  multiplier.
 - `ItemStack` stores an `ItemId` plus a count.
 - `Inventory` owns fixed slots and merges compatible stacks before using empty
   slots.
@@ -30,7 +33,10 @@ Minecraft-style default of 64 items per stack.
 
 Blocks declare drops as item keys on `BlockDefinition::drops`. Windowed
 gameplay resolves those keys through `ItemRegistry` when a block breaks and
-spawns one dropped item entity per configured drop.
+spawns one dropped item entity per configured drop. Blocks can also declare a
+`harvest_requirement`; if the selected item does not provide a matching tool
+kind and sufficient harvest level, the block still breaks but configured drops
+are suppressed.
 
 Keep this path data-driven:
 
@@ -40,6 +46,36 @@ Keep this path data-driven:
 - If a dropped block resource should be placeable, register it as a block item
   with a `place_block` target. Stone uses this path by dropping placeable
   cobblestone.
+- Keep harvest requirements on block definitions. Do not branch on concrete
+  block keys from the windowed controller.
+
+## Tools
+
+Current HumanCraft tool content includes wooden, stone, iron, and diamond
+pickaxes, shovels, and axes. Tool material data follows the vanilla speed
+multiplier progression used by the current mining system:
+
+- wood: harvest level 1, speed multiplier 2
+- stone: harvest level 2, speed multiplier 4
+- iron: harvest level 3, speed multiplier 6
+- diamond: harvest level 4, speed multiplier 8
+
+Break duration is computed from block hardness. Blocks with a matching
+effective tool use `hardness * 1.5 / tool_speed_multiplier` seconds. Blocks
+without a selected matching tool keep hand speed when no harvest tool is
+required, or use the slower inefficient path of `hardness * 5.0` seconds when a
+harvest tool is required.
+
+Current block tool data:
+
+- shovel-effective: grass, dirt, sand
+- axe-effective: oak logs, oak planks, crafting tables
+- pickaxe-required level 1: stone, cobblestone, sandstone, coal ore
+- pickaxe-required level 2: iron ore
+- pickaxe-required level 3: gold ore, diamond ore
+
+Iron ore currently drops `humancraft:iron_ingot` directly so iron tool recipes
+are reachable before furnace smelting exists.
 
 ## Crafting
 
@@ -53,6 +89,11 @@ Current starter crafting content:
   anywhere in a 2 x 2 or 3 x 3 grid produces four `humancraft:oak_planks`.
 - shaped `humancraft:crafting_table_from_oak_planks`: a filled 2 x 2 square of
   `humancraft:oak_planks` produces one `humancraft:crafting_table`.
+- shaped `humancraft:sticks_from_oak_planks`: two vertical
+  `humancraft:oak_planks` produce four `humancraft:stick`.
+- shaped wooden, stone, iron, and diamond tool recipes use the original
+  Minecraft 3 x 3 pickaxe, shovel, and axe shapes. Axes include both left and
+  right orientations.
 
 The windowed client owns only transient crafting inputs. Closing inventory,
 pausing, saving, or switching back to menus attempts to return crafting-grid
@@ -67,9 +108,11 @@ simulation until a fuller gameplay/entity layer exists.
 Current behavior:
 
 - Holding left click advances block breaking according to
-  `BlockDefinition::hardness`. A block is replaced with air and spawns
-  configured loot only after its current break progress reaches the required
-  duration. Blocks tagged `unbreakable` never start break progress.
+  `BlockDefinition::hardness`, selected-item tool metadata, and the target
+  block's effective tool. A block is replaced with air only after its current
+  break progress reaches the required duration. Configured loot spawns only if
+  the selected item satisfies the target block's harvest requirement. Blocks
+  tagged `unbreakable` never start break progress.
 - Holding left or right click repeats block breaking or selected-hotbar block
   placement at explicit cadences. Left-click breaking is continuous
   hardness-based progress; right-click placement still uses the repeat cadence
@@ -134,6 +177,8 @@ Keep regression coverage focused on player-facing behavior and data integrity:
 - held block interaction repeat cadence
 - block drops resolving to registered items
 - breaking blocks spawning configured loot
+- tool tiers controlling break speed
+- harvest requirements suppressing drops for hand or under-tier tools
 - loot from a broken block under another block spawning in open space and
   falling normally
 - pickup adding loot to inventory

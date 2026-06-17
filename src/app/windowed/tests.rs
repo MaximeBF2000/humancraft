@@ -401,7 +401,9 @@ fn breaking_block_spawns_configured_loot() {
         .unwrap();
     world.insert_chunk(chunk);
 
-    let dirty = world.break_block(WorldBlockPosition { x: 1, y: 1, z: 1 });
+    let wood_pickaxe = world.items.id_for_key("humancraft:wood_pickaxe").unwrap();
+    let dirty =
+        world.break_block_with_item(WorldBlockPosition { x: 1, y: 1, z: 1 }, Some(wood_pickaxe));
     let cobblestone = world.items.id_for_key("humancraft:cobblestone").unwrap();
 
     assert_eq!(dirty, vec![ChunkPosition { x: 0, z: 0 }]);
@@ -424,15 +426,93 @@ fn block_breaking_uses_hardness_progress_before_editing_world() {
     let dirt = WorldBlockPosition { x: 1, y: 1, z: 1 };
     let stone = WorldBlockPosition { x: 2, y: 1, z: 1 };
 
-    assert!(world.continue_breaking_block(dirt, 0.74).is_empty());
+    assert!(world.continue_breaking_block(dirt, 0.74, None).is_empty());
     assert_eq!(world.block(dirt), Some(content.block_ids.dirt));
-    assert!(!world.continue_breaking_block(dirt, 0.01).is_empty());
+    assert!(!world.continue_breaking_block(dirt, 0.01, None).is_empty());
     assert_eq!(world.block(dirt), Some(content.block_ids.air));
 
-    assert!(world.continue_breaking_block(stone, 2.24).is_empty());
+    assert!(world.continue_breaking_block(stone, 7.49, None).is_empty());
     assert_eq!(world.block(stone), Some(content.block_ids.stone));
-    assert!(!world.continue_breaking_block(stone, 0.01).is_empty());
+    assert!(!world.continue_breaking_block(stone, 0.01, None).is_empty());
     assert_eq!(world.block(stone), Some(content.block_ids.air));
+}
+
+#[test]
+fn tool_tier_controls_stone_break_speed() {
+    let content = bootstrap_content().unwrap();
+    let mut world = test_client_world(&content);
+    let mut chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, content.block_ids.air);
+    chunk
+        .set_block(BlockPosition { x: 1, y: 1, z: 1 }, content.block_ids.stone)
+        .unwrap();
+    chunk
+        .set_block(BlockPosition { x: 2, y: 1, z: 1 }, content.block_ids.stone)
+        .unwrap();
+    world.insert_chunk(chunk);
+    let wood_pickaxe = world.items.id_for_key("humancraft:wood_pickaxe").unwrap();
+    let stone_pickaxe = world.items.id_for_key("humancraft:stone_pickaxe").unwrap();
+    let wood_target = WorldBlockPosition { x: 1, y: 1, z: 1 };
+    let stone_target = WorldBlockPosition { x: 2, y: 1, z: 1 };
+
+    assert!(
+        world
+            .continue_breaking_block(wood_target, 1.12, Some(wood_pickaxe))
+            .is_empty()
+    );
+    assert!(
+        !world
+            .continue_breaking_block(wood_target, 0.01, Some(wood_pickaxe))
+            .is_empty()
+    );
+    assert!(
+        world
+            .continue_breaking_block(stone_target, 0.56, Some(stone_pickaxe))
+            .is_empty()
+    );
+    assert!(
+        !world
+            .continue_breaking_block(stone_target, 0.01, Some(stone_pickaxe))
+            .is_empty()
+    );
+}
+
+#[test]
+fn harvest_requirement_controls_block_loot() {
+    let content = bootstrap_content().unwrap();
+    let mut world = test_client_world(&content);
+    let mut chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, content.block_ids.air);
+    let stone = WorldBlockPosition { x: 1, y: 1, z: 1 };
+    let diamond_ore = WorldBlockPosition { x: 2, y: 1, z: 1 };
+    let diamond_ore_with_iron = WorldBlockPosition { x: 3, y: 1, z: 1 };
+    chunk
+        .set_block(BlockPosition { x: 1, y: 1, z: 1 }, content.block_ids.stone)
+        .unwrap();
+    chunk
+        .set_block(
+            BlockPosition { x: 2, y: 1, z: 1 },
+            content.block_ids.diamond_ore,
+        )
+        .unwrap();
+    chunk
+        .set_block(
+            BlockPosition { x: 3, y: 1, z: 1 },
+            content.block_ids.diamond_ore,
+        )
+        .unwrap();
+    world.insert_chunk(chunk);
+    let stone_pickaxe = world.items.id_for_key("humancraft:stone_pickaxe").unwrap();
+    let iron_pickaxe = world.items.id_for_key("humancraft:iron_pickaxe").unwrap();
+
+    world.break_block(stone);
+    assert!(world.loot_entities.is_empty());
+
+    world.break_block_with_item(diamond_ore, Some(stone_pickaxe));
+    assert!(world.loot_entities.is_empty());
+
+    world.break_block_with_item(diamond_ore_with_iron, Some(iron_pickaxe));
+    let diamond = world.items.id_for_key("humancraft:diamond").unwrap();
+    assert_eq!(world.loot_entities.len(), 1);
+    assert_eq!(world.loot_entities[0].stack, ItemStack::new(diamond, 1));
 }
 
 #[test]
@@ -450,8 +530,8 @@ fn block_break_progress_resets_when_target_changes() {
     let first = WorldBlockPosition { x: 1, y: 1, z: 1 };
     let second = WorldBlockPosition { x: 2, y: 1, z: 1 };
 
-    world.continue_breaking_block(first, 0.5);
-    world.continue_breaking_block(second, 0.3);
+    world.continue_breaking_block(first, 0.5, None);
+    world.continue_breaking_block(second, 0.3, None);
 
     let progress = world.block_break_progress().unwrap();
     assert_eq!(progress.target, second);
@@ -826,7 +906,8 @@ fn loot_from_block_below_another_block_spawns_in_open_space_and_falls() {
         .unwrap();
     world.insert_chunk(chunk);
 
-    world.break_block(WorldBlockPosition { x: 1, y: 1, z: 1 });
+    let wood_pickaxe = world.items.id_for_key("humancraft:wood_pickaxe").unwrap();
+    world.break_block_with_item(WorldBlockPosition { x: 1, y: 1, z: 1 }, Some(wood_pickaxe));
     assert_eq!(world.loot_entities.len(), 1);
     assert!(world.loot_entities[0].position.y + LOOT_RENDER_HALF_SIZE * 2.0 < 2.0);
 
@@ -866,7 +947,11 @@ fn client_world_does_not_break_unbreakable_blocks() {
     let position = WorldBlockPosition { x: 1, y: 0, z: 1 };
 
     assert!(world.is_solid(position));
-    assert!(world.continue_breaking_block(position, 60.0).is_empty());
+    assert!(
+        world
+            .continue_breaking_block(position, 60.0, None)
+            .is_empty()
+    );
     assert_eq!(world.block(position), Some(content.block_ids.bedrock));
 }
 

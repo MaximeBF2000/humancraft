@@ -74,6 +74,15 @@ mod tests {
         assert!(content.blocks.get_by_key("humancraft:sandstone").is_some());
         assert!(content.blocks.get_by_key("humancraft:bedrock").is_some());
         assert!(content.items.get_by_key("humancraft:diamond").is_some());
+        assert!(content.items.get_by_key("humancraft:stick").is_some());
+        assert!(content.items.get_by_key("humancraft:iron_ingot").is_some());
+        assert!(
+            content
+                .items
+                .get_by_key("humancraft:wood_pickaxe")
+                .is_some()
+        );
+        assert!(content.items.get_by_key("humancraft:diamond_axe").is_some());
         assert!(content.items.get_by_key("humancraft:oak_planks").is_some());
         assert!(
             content
@@ -91,6 +100,18 @@ mod tests {
             content
                 .recipes
                 .get_by_key("humancraft:crafting_table_from_oak_planks")
+                .is_some()
+        );
+        assert!(
+            content
+                .recipes
+                .get_by_key("humancraft:sticks_from_oak_planks")
+                .is_some()
+        );
+        assert!(
+            content
+                .recipes
+                .get_by_key("humancraft:iron_pickaxe")
                 .is_some()
         );
         assert_eq!(
@@ -120,6 +141,40 @@ mod tests {
         assert_eq!(
             crafting_result(&content.recipes, &content.items, &grid, 2),
             Some(ItemStack::new(crafting_table, 1))
+        );
+    }
+
+    #[test]
+    fn stick_recipe_uses_two_vertical_oak_planks() {
+        let content = bootstrap_content().unwrap();
+        let oak_planks = content.items.id_for_key("humancraft:oak_planks").unwrap();
+        let stick = content.items.id_for_key("humancraft:stick").unwrap();
+        let mut grid = Inventory::new(4, 0);
+        grid.set_slot(0, Some(ItemStack::new(oak_planks, 1)));
+        grid.set_slot(2, Some(ItemStack::new(oak_planks, 1)));
+
+        assert_eq!(
+            crafting_result(&content.recipes, &content.items, &grid, 2),
+            Some(ItemStack::new(stick, 4))
+        );
+    }
+
+    #[test]
+    fn iron_pickaxe_recipe_uses_original_three_by_three_shape() {
+        let content = bootstrap_content().unwrap();
+        let iron_ingot = content.items.id_for_key("humancraft:iron_ingot").unwrap();
+        let stick = content.items.id_for_key("humancraft:stick").unwrap();
+        let iron_pickaxe = content.items.id_for_key("humancraft:iron_pickaxe").unwrap();
+        let mut grid = Inventory::new(9, 0);
+        for slot in 0..3 {
+            grid.set_slot(slot, Some(ItemStack::new(iron_ingot, 1)));
+        }
+        grid.set_slot(4, Some(ItemStack::new(stick, 1)));
+        grid.set_slot(7, Some(ItemStack::new(stick, 1)));
+
+        assert_eq!(
+            crafting_result(&content.recipes, &content.items, &grid, 3),
+            Some(ItemStack::new(iron_pickaxe, 1))
         );
     }
 

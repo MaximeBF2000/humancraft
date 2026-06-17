@@ -7,11 +7,14 @@ use crate::engine::mesh::chunk_mesher::{ChunkMesh, ChunkMesher};
 use crate::engine::world::generation::{GenerationContext, GenerationPipeline};
 use crate::engine::world::save::WorldSaveStore;
 use crate::engine::world::{
-    BlockId, BlockRegistry, Chunk, ChunkPosition, CraftingRecipeRegistry, Inventory, ItemRegistry,
-    LootEntity,
+    BlockId, BlockRegistry, Chunk, ChunkPosition, CraftingRecipeRegistry, Inventory, ItemId,
+    ItemRegistry, LootEntity, ToolDefinition,
 };
 
-use super::constants::{HAND_BREAK_SECONDS_PER_HARDNESS, MIN_BLOCK_BREAK_SECONDS};
+use super::constants::{
+    CORRECT_TOOL_SECONDS_PER_HARDNESS, INEFFICIENT_BREAK_SECONDS_PER_HARDNESS,
+    MIN_BLOCK_BREAK_SECONDS,
+};
 use super::render_types::Vertex;
 use super::spatial::{
     WorldBlockPosition, chunk_position_for_render_position,
@@ -235,6 +238,12 @@ impl ClientWorld {
         dirty_chunks
     }
 
+    pub(super) fn selected_hotbar_item(&self, selected_hotbar_slot: usize) -> Option<ItemId> {
+        self.player_inventory
+            .slot(selected_hotbar_slot)
+            .map(|stack| stack.item)
+    }
+
     pub(super) fn raycast(&self, origin: Vec3, direction: Vec3) -> Option<RaycastHit> {
         let mut previous = world_block_from_render(origin);
         let step = 0.08;
@@ -262,15 +271,31 @@ impl ClientWorld {
     #[cfg(test)]
     pub(super) fn break_block(&mut self, position: WorldBlockPosition) -> Vec<ChunkPosition> {
         self.clear_block_break_progress();
-        self.break_block_immediately(position)
+        self.break_block_immediately(position, None)
     }
 
-    fn break_block_immediately(&mut self, position: WorldBlockPosition) -> Vec<ChunkPosition> {
+    #[cfg(test)]
+    pub(super) fn break_block_with_item(
+        &mut self,
+        position: WorldBlockPosition,
+        held_item: Option<ItemId>,
+    ) -> Vec<ChunkPosition> {
+        self.clear_block_break_progress();
+        self.break_block_immediately(position, held_item)
+    }
+
+    fn break_block_immediately(
+        &mut self,
+        position: WorldBlockPosition,
+        held_item: Option<ItemId>,
+    ) -> Vec<ChunkPosition> {
         if self.is_unbreakable(position) {
             return Vec::new();
         }
         if let Some(block) = self.block(position) {
-            self.spawn_loot_for_block(block, position);
+            if self.can_harvest_block(block, held_item) {
+                self.spawn_loot_for_block(block, position);
+            }
         }
         self.set_block(position, self.block_ids.air)
     }
@@ -279,8 +304,9 @@ impl ClientWorld {
         &mut self,
         position: WorldBlockPosition,
         delta_seconds: f32,
+        held_item: Option<ItemId>,
     ) -> Vec<ChunkPosition> {
-        let Some(required_seconds) = self.block_break_seconds(position) else {
+        let Some(required_seconds) = self.block_break_seconds(position, held_item) else {
             self.clear_block_break_progress();
             return Vec::new();
         };
@@ -306,7 +332,7 @@ impl ClientWorld {
         }
 
         self.active_block_break = None;
-        self.break_block_immediately(position)
+        self.break_block_immediately(position, held_item)
     }
 
     pub(super) fn clear_block_break_progress(&mut self) {
@@ -346,13 +372,44 @@ impl ClientWorld {
             .unwrap_or(false)
     }
 
-    fn block_break_seconds(&self, position: WorldBlockPosition) -> Option<f32> {
+    fn block_break_seconds(
+        &self,
+        position: WorldBlockPosition,
+        held_item: Option<ItemId>,
+    ) -> Option<f32> {
         let block = self.block(position)?;
         let definition = self.blocks.get(block)?;
         if definition.has_tag("unbreakable") || definition.hardness <= 0.0 {
             return None;
         }
-        Some((definition.hardness * HAND_BREAK_SECONDS_PER_HARDNESS).max(MIN_BLOCK_BREAK_SECONDS))
+        let tool = self.tool_for_item(held_item);
+        let seconds_per_hardness = match definition.effective_tool {
+            Some(required_kind) if tool.is_some_and(|tool| tool.kind == required_kind) => {
+                CORRECT_TOOL_SECONDS_PER_HARDNESS / tool.unwrap().speed_multiplier
+            }
+            Some(_) if definition.harvest_requirement.is_some() => {
+                INEFFICIENT_BREAK_SECONDS_PER_HARDNESS
+            }
+            _ => CORRECT_TOOL_SECONDS_PER_HARDNESS,
+        };
+        Some((definition.hardness * seconds_per_hardness).max(MIN_BLOCK_BREAK_SECONDS))
+    }
+
+    fn can_harvest_block(&self, block: BlockId, held_item: Option<ItemId>) -> bool {
+        let Some(definition) = self.blocks.get(block) else {
+            return false;
+        };
+        let Some(requirement) = definition.harvest_requirement else {
+            return true;
+        };
+        self.tool_for_item(held_item).is_some_and(|tool| {
+            tool.kind == requirement.tool && tool.harvest_level >= requirement.min_level
+        })
+    }
+
+    fn tool_for_item(&self, item: Option<ItemId>) -> Option<ToolDefinition> {
+        item.and_then(|item| self.items.get(item))
+            .and_then(|definition| definition.tool)
     }
 
     pub(super) fn block(&self, position: WorldBlockPosition) -> Option<BlockId> {

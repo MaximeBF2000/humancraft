@@ -1,7 +1,7 @@
 //! HumanCraft block registration.
 
 use crate::engine::registry::RegistryError;
-use crate::engine::world::{BlockDefinition, BlockId, BlockRegistry, BlockTextures};
+use crate::engine::world::{BlockDefinition, BlockId, BlockRegistry, BlockTextures, ToolKind};
 
 #[derive(Debug, Copy, Clone)]
 pub struct BlockIds {
@@ -35,6 +35,7 @@ pub fn register_blocks(blocks: &mut BlockRegistry) -> Result<BlockIds, RegistryE
         BlockDefinition::new("humancraft:grass", "Grass Block")
             .hardness(0.6)
             .drops(["humancraft:dirt"])
+            .effective_tool(ToolKind::Shovel)
             .tags(["terrain", "soil"])
             .textures(BlockTextures::top_bottom_sides(
                 "humancraft:block/grass/top",
@@ -46,6 +47,7 @@ pub fn register_blocks(blocks: &mut BlockRegistry) -> Result<BlockIds, RegistryE
         BlockDefinition::new("humancraft:dirt", "Dirt")
             .hardness(0.5)
             .drops(["humancraft:dirt"])
+            .effective_tool(ToolKind::Shovel)
             .tags(["terrain", "soil"])
             .textures(BlockTextures::all("humancraft:block/dirt/top")),
     )?;
@@ -53,6 +55,8 @@ pub fn register_blocks(blocks: &mut BlockRegistry) -> Result<BlockIds, RegistryE
         BlockDefinition::new("humancraft:stone", "Stone")
             .hardness(1.5)
             .drops(["humancraft:cobblestone"])
+            .effective_tool(ToolKind::Pickaxe)
+            .harvest_requirement(ToolKind::Pickaxe, 1)
             .tags(["terrain", "stone", "ore_host"])
             .textures(BlockTextures::all("humancraft:block/stone/top")),
     )?;
@@ -60,6 +64,8 @@ pub fn register_blocks(blocks: &mut BlockRegistry) -> Result<BlockIds, RegistryE
         BlockDefinition::new("humancraft:cobblestone", "Cobblestone")
             .hardness(2.0)
             .drops(["humancraft:cobblestone"])
+            .effective_tool(ToolKind::Pickaxe)
+            .harvest_requirement(ToolKind::Pickaxe, 1)
             .tags(["terrain", "stone", "ore_host"])
             .textures(BlockTextures::all("humancraft:block/cobblestone/top")),
     )?;
@@ -67,13 +73,17 @@ pub fn register_blocks(blocks: &mut BlockRegistry) -> Result<BlockIds, RegistryE
         BlockDefinition::new("humancraft:coal_ore", "Coal Ore")
             .hardness(3.0)
             .drops(["humancraft:coal"])
+            .effective_tool(ToolKind::Pickaxe)
+            .harvest_requirement(ToolKind::Pickaxe, 1)
             .tags(["ore", "stone"])
             .textures(BlockTextures::all("humancraft:block/coal_ore/top")),
     )?;
     let iron_ore = blocks.register(
         BlockDefinition::new("humancraft:iron_ore", "Iron Ore")
             .hardness(3.0)
-            .drops(["humancraft:raw_iron"])
+            .drops(["humancraft:iron_ingot"])
+            .effective_tool(ToolKind::Pickaxe)
+            .harvest_requirement(ToolKind::Pickaxe, 2)
             .tags(["ore", "stone"])
             .textures(BlockTextures::all("humancraft:block/iron_ore/top")),
     )?;
@@ -81,6 +91,8 @@ pub fn register_blocks(blocks: &mut BlockRegistry) -> Result<BlockIds, RegistryE
         BlockDefinition::new("humancraft:gold_ore", "Gold Ore")
             .hardness(3.0)
             .drops(["humancraft:raw_gold"])
+            .effective_tool(ToolKind::Pickaxe)
+            .harvest_requirement(ToolKind::Pickaxe, 3)
             .tags(["ore", "stone"])
             .textures(BlockTextures::all("humancraft:block/gold_ore/top")),
     )?;
@@ -88,6 +100,8 @@ pub fn register_blocks(blocks: &mut BlockRegistry) -> Result<BlockIds, RegistryE
         BlockDefinition::new("humancraft:diamond_ore", "Diamond Ore")
             .hardness(3.0)
             .drops(["humancraft:diamond"])
+            .effective_tool(ToolKind::Pickaxe)
+            .harvest_requirement(ToolKind::Pickaxe, 3)
             .tags(["ore", "stone"])
             .textures(BlockTextures::all("humancraft:block/diamond_ore/top")),
     )?;
@@ -95,6 +109,7 @@ pub fn register_blocks(blocks: &mut BlockRegistry) -> Result<BlockIds, RegistryE
         BlockDefinition::new("humancraft:oak_log", "Oak Log")
             .hardness(2.0)
             .drops(["humancraft:oak_log"])
+            .effective_tool(ToolKind::Axe)
             .tags(["wood", "tree_trunk"])
             .textures(BlockTextures::top_bottom_sides(
                 "humancraft:block/oak_log/top",
@@ -114,6 +129,7 @@ pub fn register_blocks(blocks: &mut BlockRegistry) -> Result<BlockIds, RegistryE
         BlockDefinition::new("humancraft:oak_planks", "Oak Planks")
             .hardness(2.0)
             .drops(["humancraft:oak_planks"])
+            .effective_tool(ToolKind::Axe)
             .tags(["wood", "planks"])
             .textures(BlockTextures::all("humancraft:block/oak_planks/top")),
     )?;
@@ -121,6 +137,7 @@ pub fn register_blocks(blocks: &mut BlockRegistry) -> Result<BlockIds, RegistryE
         BlockDefinition::new("humancraft:crafting_table", "Crafting Table")
             .hardness(2.5)
             .drops(["humancraft:crafting_table"])
+            .effective_tool(ToolKind::Axe)
             .tags(["wood", "utility", "crafting_table"])
             .textures(BlockTextures {
                 top: "humancraft:block/crafting_table/top".to_string(),
@@ -135,6 +152,7 @@ pub fn register_blocks(blocks: &mut BlockRegistry) -> Result<BlockIds, RegistryE
         BlockDefinition::new("humancraft:sand", "Sand")
             .hardness(0.5)
             .drops(["humancraft:sand"])
+            .effective_tool(ToolKind::Shovel)
             .tags(["terrain", "sand"])
             .textures(BlockTextures::all("humancraft:block/sand/top")),
     )?;
@@ -142,6 +160,8 @@ pub fn register_blocks(blocks: &mut BlockRegistry) -> Result<BlockIds, RegistryE
         BlockDefinition::new("humancraft:sandstone", "Sandstone")
             .hardness(0.8)
             .drops(["humancraft:sandstone"])
+            .effective_tool(ToolKind::Pickaxe)
+            .harvest_requirement(ToolKind::Pickaxe, 1)
             .tags(["terrain", "stone", "ore_host"])
             .textures(BlockTextures::top_bottom_sides(
                 "humancraft:block/sandstone/top",

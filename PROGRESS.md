@@ -1,10 +1,46 @@
 # HumanCraft Progress
 
-Last updated: 2026-06-16
+Last updated: 2026-06-17
 
 ## Done
 
 - Read `PRD.md` and `DEV_PHILOSOPHY.md`.
+- Added reusable tool metadata to item definitions:
+  - tool kind
+  - tool material
+  - harvest level
+  - mining speed multiplier
+- Added reusable block harvest metadata:
+  - effective tool kind
+  - optional harvest requirement with minimum level
+- Added HumanCraft stick and tool content:
+  - sticks
+  - wooden, stone, iron, and diamond pickaxes
+  - wooden, stone, iron, and diamond shovels
+  - wooden, stone, iron, and diamond axes
+- Added Minecraft-style crafting recipes:
+  - two vertical oak planks craft four sticks
+  - pickaxes use three material items above two centered sticks
+  - shovels use one material item above two sticks
+  - axes use three material items around two sticks in either orientation
+- Copied stick, tool, and iron-ingot item textures from
+  `minecraft_default_ressource_pack/assets/minecraft/textures/items`.
+- Added tool-aware block breaking in the windowed client:
+  - matching tools use vanilla-style speed multipliers
+  - hand or wrong-tool breaking still works
+  - harvest-required blocks break slowly without a matching tool
+  - harvest-required blocks only drop loot with a sufficient tool
+- Configured starter harvest progression:
+  - stone, cobblestone, sandstone, and coal ore require a wooden pickaxe or
+    better
+  - iron ore requires a stone pickaxe or better
+  - gold and diamond ore require an iron pickaxe or better
+  - dirt, grass, and sand are shovel-effective
+  - oak logs, oak planks, and crafting tables are axe-effective
+- Temporarily changed iron ore to drop iron ingots directly so iron tools are
+  craftable before furnace smelting exists.
+- Added regression coverage for stick crafting, iron pickaxe crafting, tool
+  tier break speed, harvest-gated drops, and the imported tool item textures.
 - Initialized a Rust Cargo project named `humancraft`.
 - Added a library/application split.
 - Added generic registry primitives with duplicate-key protection.

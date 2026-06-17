@@ -29,8 +29,10 @@ In-game controls:
 - `Space`: jump
 - Mouse: look around
 - Hold left click: damage the targeted block until its material strength is
-  exhausted. Softer blocks break quickly; stone and ores take longer. Releasing
-  the button or aiming at another block resets the current damage.
+  exhausted. Softer blocks break quickly; stone and ores take longer. The
+  selected tool changes break speed, and blocks that need a tool only drop loot
+  when the selected tool meets the harvest requirement. Releasing the button or
+  aiming at another block resets the current damage.
 - Right click or hold right click: place the selected hotbar item when it is a
   placeable block. Right clicking a crafting table opens its crafting UI
   instead.
@@ -49,9 +51,16 @@ releases the cursor; pressing `E` or `Esc` closes it and recaptures mouse-look.
 
 The inventory overlay includes a 2 x 2 crafting grid. Put one oak log in any
 crafting slot to produce four oak planks. Put oak planks in all four 2 x 2
-crafting slots to craft a crafting table. Right click a placed crafting table
-to open the 3 x 3 crafting table grid. Crafting inputs are returned to the
-player inventory when the UI closes, space permitting.
+crafting slots to craft a crafting table. Put two oak planks vertically to
+craft four sticks. Right click a placed crafting table to open the 3 x 3
+crafting table grid. The 3 x 3 grid crafts wooden, stone, iron, and diamond
+pickaxes, shovels, and axes with the original Minecraft-style tool shapes:
+pickaxes use three material items over two centered sticks, shovels use one
+material item over two sticks, and axes use three material items around two
+sticks in either left or right orientation. Iron tools currently use iron
+ingots, which iron ore drops directly until furnace smelting exists. Crafting
+inputs are returned to the player inventory when the UI closes, space
+permitting.
 
 Inventory and crafting overlay controls:
 
@@ -70,7 +79,9 @@ Breaking a block drops its configured loot into the world as a Y-axis rotating
 item entity. Walk close to the dropped item to pick it up. The item is added to
 the first compatible inventory stack, up to the current 64-item stack limit,
 then to the first empty slot. Stone currently drops cobblestone, and the
-cobblestone stack can be selected and placed as a block.
+cobblestone stack can be selected and placed as a block. Stone, cobblestone,
+sandstone, coal ore, iron ore, gold ore, and diamond ore require a sufficient
+pickaxe to drop loot. Diamond and gold ore require an iron pickaxe or better.
 
 ## Movement
 

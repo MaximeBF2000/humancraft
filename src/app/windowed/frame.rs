@@ -93,7 +93,11 @@ impl RenderState {
             world.clear_block_break_progress();
             return Vec::new();
         };
-        world.continue_breaking_block(hit.block, delta_seconds)
+        world.continue_breaking_block(
+            hit.block,
+            delta_seconds,
+            world.selected_hotbar_item(self.selected_hotbar_slot),
+        )
     }
 
     pub(super) fn render(&mut self) -> Result<(), wgpu::SurfaceError> {

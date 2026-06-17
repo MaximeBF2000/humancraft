@@ -2,7 +2,7 @@
 
 use crate::content::BlockIds;
 use crate::engine::registry::RegistryError;
-use crate::engine::world::{ItemDefinition, ItemRegistry};
+use crate::engine::world::{ItemDefinition, ItemRegistry, ToolDefinition, ToolKind, ToolMaterial};
 
 pub fn register_items(items: &mut ItemRegistry, _blocks: BlockIds) -> Result<(), RegistryError> {
     register_block_item(items, "humancraft:dirt", "Dirt", "humancraft:dirt")?;
@@ -49,6 +49,11 @@ pub fn register_items(items: &mut ItemRegistry, _blocks: BlockIds) -> Result<(),
             .tags(["ore_drop"]),
     )?;
     items.register(
+        ItemDefinition::new("humancraft:iron_ingot", "Iron Ingot")
+            .texture(item_texture_key("humancraft:iron_ingot"))
+            .tags(["ingot"]),
+    )?;
+    items.register(
         ItemDefinition::new("humancraft:raw_gold", "Raw Gold")
             .texture(item_texture_key("humancraft:raw_gold"))
             .tags(["ore_drop"]),
@@ -58,6 +63,15 @@ pub fn register_items(items: &mut ItemRegistry, _blocks: BlockIds) -> Result<(),
             .texture(item_texture_key("humancraft:diamond"))
             .tags(["gem"]),
     )?;
+    items.register(
+        ItemDefinition::new("humancraft:stick", "Stick")
+            .texture(item_texture_key("humancraft:stick"))
+            .tags(["crafting_material"]),
+    )?;
+    register_tool_family(items, ToolMaterial::Wood, "wood", "Wooden")?;
+    register_tool_family(items, ToolMaterial::Stone, "stone", "Stone")?;
+    register_tool_family(items, ToolMaterial::Iron, "iron", "Iron")?;
+    register_tool_family(items, ToolMaterial::Diamond, "diamond", "Diamond")?;
     register_block_item(items, "humancraft:oak_log", "Oak Log", "humancraft:oak_log")?;
     register_block_item(
         items,
@@ -105,6 +119,62 @@ fn register_block_item(
             ItemDefinition::new(key, display_name)
                 .place_block(block_key)
                 .texture(item_texture_key(key)),
+        )
+        .map(|_| ())
+}
+
+fn register_tool_family(
+    items: &mut ItemRegistry,
+    material: ToolMaterial,
+    material_key: &str,
+    material_name: &str,
+) -> Result<(), RegistryError> {
+    register_tool(
+        items,
+        material,
+        material_key,
+        material_name,
+        ToolKind::Pickaxe,
+        "pickaxe",
+        "Pickaxe",
+    )?;
+    register_tool(
+        items,
+        material,
+        material_key,
+        material_name,
+        ToolKind::Shovel,
+        "shovel",
+        "Shovel",
+    )?;
+    register_tool(
+        items,
+        material,
+        material_key,
+        material_name,
+        ToolKind::Axe,
+        "axe",
+        "Axe",
+    )
+}
+
+fn register_tool(
+    items: &mut ItemRegistry,
+    material: ToolMaterial,
+    material_key: &str,
+    material_name: &str,
+    kind: ToolKind,
+    kind_key: &str,
+    kind_name: &str,
+) -> Result<(), RegistryError> {
+    let key = format!("humancraft:{material_key}_{kind_key}");
+    items
+        .register(
+            ItemDefinition::new(&key, format!("{material_name} {kind_name}"))
+                .max_stack_size(1)
+                .texture(item_texture_key(&key))
+                .tool(ToolDefinition::new(kind, material))
+                .tags(["tool"]),
         )
         .map(|_| ())
 }

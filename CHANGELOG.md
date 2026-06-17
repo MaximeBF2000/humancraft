@@ -9,6 +9,22 @@ status file for verification notes, next steps, and implementation details.
 
 - Read the project PRD, development philosophy, and progress notes before
   continuing implementation.
+- Added reusable tool metadata to item definitions and reusable harvest
+  metadata to block definitions, keeping mining behavior data-driven.
+- Added sticks plus wooden, stone, iron, and diamond pickaxes, shovels, and
+  axes, with default resource-pack item textures.
+- Added Minecraft-style shaped recipes for sticks and wood, stone, iron, and
+  diamond tools, including mirrored axe recipes.
+- Changed windowed block breaking to use the selected hotbar tool for break
+  speed and harvest eligibility. Hand or wrong-tool breaking still removes the
+  block, but harvest-required blocks break slowly and do not drop loot unless
+  the tool kind and tier are sufficient.
+- Configured early harvest progression for stone, cobblestone, sandstone, coal
+  ore, iron ore, gold ore, and diamond ore. Diamond and gold ore require an
+  iron pickaxe or better.
+- Changed iron ore to drop iron ingots directly as a temporary bridge until
+  furnace smelting is implemented, so iron tool recipes are reachable in the
+  current survival loop.
 - Added `docs/generating_textures.md` to document importing accurate block,
   item, mob, and UI textures from the default resource pack, including current
   grass/foliage tint-mask handling.
