@@ -1,3 +1,5 @@
 /target/
 /out/
 /saves/
+/minecraft_default_ressource_pack/
+.DS_store

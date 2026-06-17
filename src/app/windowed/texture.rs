@@ -36,6 +36,12 @@ impl TextureAtlas {
                 texture_keys.push(key.to_string());
             }
         }
+        for key in destroy_stage_texture_keys() {
+            if !texture_keys.contains(&key.to_string()) {
+                texture_keys.push(key.to_string());
+            }
+        }
+        texture_keys.push(player_hand_texture_key());
 
         let width = Self::TILE_SIZE * texture_keys.len() as u32;
         let height = Self::TILE_SIZE;
@@ -320,6 +326,24 @@ pub(super) fn texture_path(key: &str) -> Option<PathBuf> {
         );
     }
 
+    if let Some(stage) = key.strip_prefix("humancraft:destroy/") {
+        return Some(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("textures")
+                .join("overlays")
+                .join(format!("destroy_stage_{stage}.png")),
+        );
+    }
+
+    if key == player_hand_texture_key() {
+        return Some(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("textures")
+                .join("overlays")
+                .join("player_hand.png"),
+        );
+    }
+
     let item = key.strip_prefix("humancraft:item/")?;
     Some(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -327,6 +351,18 @@ pub(super) fn texture_path(key: &str) -> Option<PathBuf> {
             .join("items")
             .join(format!("{item}.png")),
     )
+}
+
+pub(super) fn destroy_stage_texture_key(stage: u8) -> String {
+    format!("humancraft:destroy/{}", stage.min(9))
+}
+
+pub(super) fn player_hand_texture_key() -> String {
+    "humancraft:overlay/player_hand".to_string()
+}
+
+fn destroy_stage_texture_keys() -> impl Iterator<Item = String> {
+    (0_u8..=9).map(destroy_stage_texture_key)
 }
 
 fn fallback_texture_pixels(key: &str) -> Vec<u8> {

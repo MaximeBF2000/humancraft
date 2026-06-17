@@ -17,7 +17,8 @@ Each world contains:
 
 - `world.txt`: versioned metadata with name, seed, player eye position, yaw,
   pitch, inventory slots, and timestamps.
-- `chunks/<x>_<z>.hcc`: binary block ID data for edited or saved chunks.
+- `chunks/<x>_<z>.hcc`: binary keyed-palette block data for edited or saved
+  chunks.
 
 ## Runtime Policy
 
@@ -28,6 +29,9 @@ Each world contains:
 - Chunk streaming asks the save store for a chunk first. If no saved chunk file
   exists, the deterministic generation pipeline creates the chunk from the
   world's seed.
+- Initially streamed chunks are queued for the next explicit save so newly
+  generated chunks and legacy regenerated chunks are written in the current
+  keyed format on `Save & Quit`.
 - Block edits mark affected chunks dirty in memory. Gameplay does not write
   chunk files during the render/update loop.
 - Player position, camera orientation, and inventory stay in memory while
@@ -40,12 +44,16 @@ Each world contains:
 - Metadata is a simple `key=value` text file with `version=1`.
 - Inventory slots are saved in metadata as optional item key/count lines, so
   item stacks survive content registration order changes.
-- Chunk files start with an `HCCNK001` magic header, store chunk coordinates,
-  then write `CHUNK_VOLUME` little-endian `u32` block IDs. Flushes build one
-  contiguous byte buffer per chunk before writing to avoid many tiny writes.
-- The current format stores block IDs directly. That is acceptable for this
-  early content-fixed build, but a future modding-capable format should migrate
-  to block keys or a per-save palette.
+- Current chunk files start with an `HCCNK002` magic header, store chunk
+  coordinates, write a block-key palette, then write `CHUNK_VOLUME`
+  little-endian `u16` palette indices.
+- Block keys are resolved through the current block registry when loading, so
+  saved chunks survive block registration order changes.
+- Legacy `HCCNK001` raw-ID chunks are ignored and regenerated from the world
+  seed. Those files predate keyed palettes and can otherwise reinterpret old
+  oak logs, leaves, sand, or other blocks as unrelated newer block IDs.
+- Flushes build one contiguous byte buffer per chunk before writing to avoid
+  many tiny writes.
 
 ## Known Limitations
 

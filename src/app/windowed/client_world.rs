@@ -142,7 +142,7 @@ impl ClientWorld {
             let chunk = save_store
                 .and_then(|store| {
                     store
-                        .load_chunk(&self.world_id, chunk_position)
+                        .load_chunk(&self.world_id, chunk_position, &self.blocks)
                         .ok()
                         .flatten()
                 })

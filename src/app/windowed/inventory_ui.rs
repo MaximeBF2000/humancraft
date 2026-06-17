@@ -1,12 +1,12 @@
 use glam::Vec3;
 
-use crate::engine::world::{Inventory, ItemStack, LootEntity};
+use crate::engine::world::{Inventory, ItemDefinition, ItemStack, LootEntity};
 
 use super::camera::Camera;
 use super::client_world::ClientWorld;
 use super::constants::*;
 use super::render_types::Vertex;
-use super::texture::{AtlasTile, TextureAtlas};
+use super::texture::{AtlasTile, TextureAtlas, player_hand_texture_key};
 use super::ui::{UiPoint, UiRect};
 use super::ui_builder::UiMeshBuilder;
 
@@ -16,7 +16,10 @@ pub(super) enum CraftingUiKind {
     Table,
 }
 
-const OPEN_INVENTORY_SLOT_HEIGHT: f32 = 0.086;
+const GUI_SOURCE_WIDTH: f32 = 176.0;
+const GUI_SOURCE_HEIGHT: f32 = 166.0;
+const GUI_PANEL_HEIGHT: f32 = 1.24;
+const GUI_SLOT_SIZE: f32 = 18.0;
 const CLOSED_HOTBAR_SLOT_HEIGHT: f32 = 0.112;
 const INVENTORY_GAP_Y: f32 = 0.012;
 
@@ -33,22 +36,7 @@ pub(super) fn build_gameplay_ui_mesh(
 ) -> (Vec<Vertex>, Vec<u32>) {
     let mut ui = UiMeshBuilder::default();
     if inventory_open {
-        ui.rect(UiRect::new(-0.70, -0.55, 0.70, 0.58), [0.03, 0.03, 0.03]);
-        ui.rect(UiRect::new(-0.68, -0.53, 0.68, 0.56), [0.58, 0.58, 0.56]);
-        ui.rect(UiRect::new(-0.65, -0.46, 0.65, 0.47), [0.43, 0.43, 0.41]);
-        ui.rect(UiRect::new(-0.62, -0.43, 0.62, 0.38), [0.50, 0.50, 0.48]);
-        ui.center_text(
-            0.0,
-            0.47,
-            0.007,
-            [0.18, 0.18, 0.17],
-            match crafting_kind {
-                CraftingUiKind::Inventory => "INVENTORY",
-                CraftingUiKind::Table => "CRAFTING TABLE",
-            },
-        );
-        ui.center_text(0.0, -0.485, 0.0048, [0.20, 0.20, 0.19], "E OR ESC TO CLOSE");
-        ui.text(-0.57, 0.39, 0.0048, [0.20, 0.20, 0.19], "CRAFTING");
+        draw_inventory_panel(&mut ui, crafting_kind, aspect);
         for index in 0..crafting_grid.slot_count() {
             draw_inventory_slot(
                 &mut ui,
@@ -61,16 +49,7 @@ pub(super) fn build_gameplay_ui_mesh(
             crafting_result_slot_rect(crafting_kind, aspect),
             crafting_result.is_some(),
         );
-        ui.center_text(
-            -0.01,
-            match crafting_kind {
-                CraftingUiKind::Inventory => 0.300,
-                CraftingUiKind::Table => 0.270,
-            },
-            0.007,
-            [0.20, 0.20, 0.19],
-            ">",
-        );
+        draw_crafting_arrow(&mut ui, crafting_kind, aspect);
         for index in 0..world.player_inventory.slots().len() {
             let rect = inventory_slot_rect(index, true, aspect);
             draw_inventory_slot(&mut ui, rect, index == selected_hotbar_slot);
@@ -83,9 +62,6 @@ pub(super) fn build_gameplay_ui_mesh(
                 index == selected_hotbar_slot,
             );
         }
-        if world.player_inventory.slot(selected_hotbar_slot).is_none() {
-            draw_player_arm(&mut ui, aspect);
-        }
     }
 
     for (index, stack) in world.player_inventory.slots().iter().enumerate() {
@@ -97,13 +73,7 @@ pub(super) fn build_gameplay_ui_mesh(
         };
         let rect = inventory_slot_rect(index, inventory_open, aspect);
         if stack.count > 1 {
-            ui.text(
-                rect.right - slot_width(rect) * 0.38,
-                rect.bottom + slot_height(rect) * 0.30,
-                0.0038,
-                [0.96, 0.96, 0.90],
-                &stack.count.to_string(),
-            );
+            draw_stack_count(&mut ui, rect, stack.count);
         }
     }
 
@@ -114,36 +84,24 @@ pub(super) fn build_gameplay_ui_mesh(
             };
             let rect = crafting_input_slot_rect(index, crafting_kind, aspect);
             if stack.count > 1 {
-                ui.text(
-                    rect.right - slot_width(rect) * 0.38,
-                    rect.bottom + slot_height(rect) * 0.30,
-                    0.0038,
-                    [0.96, 0.96, 0.90],
-                    &stack.count.to_string(),
-                );
+                draw_stack_count(&mut ui, rect, stack.count);
             }
         }
         if let Some(stack) = crafting_result {
             if stack.count > 1 {
-                let rect = crafting_result_slot_rect(crafting_kind, aspect);
-                ui.text(
-                    rect.right - slot_width(rect) * 0.38,
-                    rect.bottom + slot_height(rect) * 0.30,
-                    0.0038,
-                    [0.96, 0.96, 0.90],
-                    &stack.count.to_string(),
+                draw_stack_count(
+                    &mut ui,
+                    crafting_result_slot_rect(crafting_kind, aspect),
+                    stack.count,
                 );
             }
         }
         if let Some(stack) = cursor_stack {
             if stack.count > 1 {
-                let rect = carried_item_rect(cursor_point, aspect);
-                ui.text(
-                    rect.right - slot_width(rect) * 0.38,
-                    rect.bottom + slot_height(rect) * 0.30,
-                    0.0038,
-                    [0.96, 0.96, 0.90],
-                    &stack.count.to_string(),
+                draw_stack_count(
+                    &mut ui,
+                    carried_item_rect(cursor_point, aspect),
+                    stack.count,
                 );
             }
         }
@@ -176,12 +134,13 @@ pub(super) fn build_inventory_icon_mesh(
         let Some(definition) = world.items.get(stack.item) else {
             continue;
         };
-        let rect = inventory_icon_rect(inventory_slot_rect(index, inventory_open, aspect));
-        push_textured_ui_rect(
+        push_item_icon_mesh(
+            world,
+            texture_atlas,
             &mut vertices,
             &mut indices,
-            rect,
-            texture_atlas.tile(&definition.texture),
+            definition,
+            inventory_icon_rect(inventory_slot_rect(index, inventory_open, aspect)),
         );
     }
     if !inventory_open {
@@ -196,6 +155,8 @@ pub(super) fn build_inventory_icon_mesh(
                     aspect,
                 );
             }
+        } else {
+            push_player_hand_mesh(texture_atlas, &mut vertices, &mut indices, aspect);
         }
     }
     if inventory_open {
@@ -206,30 +167,36 @@ pub(super) fn build_inventory_icon_mesh(
             let Some(definition) = world.items.get(stack.item) else {
                 continue;
             };
-            push_textured_ui_rect(
+            push_item_icon_mesh(
+                world,
+                texture_atlas,
                 &mut vertices,
                 &mut indices,
+                definition,
                 inventory_icon_rect(crafting_input_slot_rect(index, crafting_kind, aspect)),
-                texture_atlas.tile(&definition.texture),
             );
         }
         if let Some(stack) = crafting_result {
             if let Some(definition) = world.items.get(stack.item) {
-                push_textured_ui_rect(
+                push_item_icon_mesh(
+                    world,
+                    texture_atlas,
                     &mut vertices,
                     &mut indices,
+                    definition,
                     inventory_icon_rect(crafting_result_slot_rect(crafting_kind, aspect)),
-                    texture_atlas.tile(&definition.texture),
                 );
             }
         }
         if let Some(stack) = cursor_stack {
             if let Some(definition) = world.items.get(stack.item) {
-                push_textured_ui_rect(
+                push_item_icon_mesh(
+                    world,
+                    texture_atlas,
                     &mut vertices,
                     &mut indices,
+                    definition,
                     carried_item_rect(cursor_point, aspect),
-                    texture_atlas.tile(&definition.texture),
                 );
             }
         }
@@ -248,6 +215,15 @@ pub(super) fn build_loot_mesh(
         let Some(definition) = world.items.get(loot.stack.item) else {
             continue;
         };
+        if let Some(block) = definition
+            .place_block
+            .as_ref()
+            .and_then(|key| world.blocks.get_by_key(key))
+            .map(|(_, block)| block)
+        {
+            push_loot_block_mesh(&mut vertices, &mut indices, texture_atlas, block, loot);
+            continue;
+        }
         let tile = texture_atlas.tile(&definition.texture);
         let corners = loot_billboard_corners(loot);
         let tex_coords = tile.uv_quad();
@@ -277,6 +253,101 @@ pub(super) fn build_loot_mesh(
     (vertices, indices)
 }
 
+fn push_loot_block_mesh(
+    vertices: &mut Vec<Vertex>,
+    indices: &mut Vec<u32>,
+    texture_atlas: &TextureAtlas,
+    block: &crate::engine::world::BlockDefinition,
+    loot: &LootEntity,
+) {
+    let half = LOOT_RENDER_HALF_SIZE * 0.72;
+    let axis_x = Vec3::new(
+        loot.rotation_radians.cos(),
+        0.0,
+        loot.rotation_radians.sin(),
+    ) * half;
+    let axis_z = Vec3::new(
+        -loot.rotation_radians.sin(),
+        0.0,
+        loot.rotation_radians.cos(),
+    ) * half;
+    let axis_y = Vec3::Y * half;
+    let center = loot.position + Vec3::Y * half;
+
+    push_world_textured_quad(
+        vertices,
+        indices,
+        [
+            center - axis_x - axis_y + axis_z,
+            center + axis_x - axis_y + axis_z,
+            center + axis_x + axis_y + axis_z,
+            center - axis_x + axis_y + axis_z,
+        ],
+        texture_atlas.tile(&block.textures.south),
+        [0.95, 0.95, 0.95],
+    );
+    push_world_textured_quad(
+        vertices,
+        indices,
+        [
+            center + axis_x - axis_y - axis_z,
+            center - axis_x - axis_y - axis_z,
+            center - axis_x + axis_y - axis_z,
+            center + axis_x + axis_y - axis_z,
+        ],
+        texture_atlas.tile(&block.textures.north),
+        [0.85, 0.85, 0.85],
+    );
+    push_world_textured_quad(
+        vertices,
+        indices,
+        [
+            center + axis_x - axis_y + axis_z,
+            center + axis_x - axis_y - axis_z,
+            center + axis_x + axis_y - axis_z,
+            center + axis_x + axis_y + axis_z,
+        ],
+        texture_atlas.tile(&block.textures.east),
+        [0.72, 0.72, 0.72],
+    );
+    push_world_textured_quad(
+        vertices,
+        indices,
+        [
+            center - axis_x - axis_y - axis_z,
+            center - axis_x - axis_y + axis_z,
+            center - axis_x + axis_y + axis_z,
+            center - axis_x + axis_y - axis_z,
+        ],
+        texture_atlas.tile(&block.textures.west),
+        [0.78, 0.78, 0.78],
+    );
+    push_world_textured_quad(
+        vertices,
+        indices,
+        [
+            center - axis_x + axis_y + axis_z,
+            center + axis_x + axis_y + axis_z,
+            center + axis_x + axis_y - axis_z,
+            center - axis_x + axis_y - axis_z,
+        ],
+        texture_atlas.tile(&block.textures.top),
+        [1.0, 1.0, 1.0],
+    );
+    push_world_textured_quad(
+        vertices,
+        indices,
+        [
+            center - axis_x - axis_y - axis_z,
+            center + axis_x - axis_y - axis_z,
+            center + axis_x - axis_y + axis_z,
+            center - axis_x - axis_y + axis_z,
+        ],
+        texture_atlas.tile(&block.textures.bottom),
+        [0.55, 0.55, 0.55],
+    );
+}
+
 pub(super) fn loot_billboard_corners(loot: &LootEntity) -> [Vec3; 4] {
     let axis_x = Vec3::new(
         loot.rotation_radians.cos(),
@@ -294,36 +365,124 @@ pub(super) fn loot_billboard_corners(loot: &LootEntity) -> [Vec3; 4] {
 }
 
 fn draw_inventory_slot(ui: &mut UiMeshBuilder, rect: UiRect, selected: bool) {
-    ui.rect(rect, [0.04, 0.04, 0.04]);
+    let pixel = slot_height(rect) / GUI_SLOT_SIZE;
+    if selected {
+        ui.rect(rect, [0.96, 0.96, 0.64]);
+    }
+    let outer = if selected {
+        inset_rect(rect, pixel)
+    } else {
+        rect
+    };
+    ui.rect(outer, [0.23, 0.23, 0.23]);
+    let frame = inset_rect(outer, pixel);
+    ui.rect(frame, [0.62, 0.62, 0.62]);
     ui.rect(
-        inset_rect(rect, 0.004),
-        if selected {
-            [0.92, 0.94, 0.82]
-        } else {
-            [0.62, 0.62, 0.60]
-        },
+        UiRect::new(frame.left, frame.bottom, frame.right, frame.bottom + pixel),
+        [0.36, 0.36, 0.36],
     );
-    ui.rect(inset_rect(rect, 0.010), [0.28, 0.29, 0.28]);
     ui.rect(
         UiRect::new(
-            rect.left + slot_width(rect) * 0.14,
-            rect.top - slot_height(rect) * 0.16,
-            rect.right - slot_width(rect) * 0.10,
-            rect.top - slot_height(rect) * 0.08,
+            frame.right - pixel / aspect_for_rect(rect),
+            frame.bottom,
+            frame.right,
+            frame.top,
         ),
-        [0.40, 0.41, 0.39],
+        [0.36, 0.36, 0.36],
     );
+    ui.rect(
+        UiRect::new(frame.left, frame.top - pixel, frame.right, frame.top),
+        [0.90, 0.90, 0.90],
+    );
+    ui.rect(
+        UiRect::new(
+            frame.left,
+            frame.bottom,
+            frame.left + pixel / aspect_for_rect(rect),
+            frame.top,
+        ),
+        [0.90, 0.90, 0.90],
+    );
+    ui.rect(inset_rect(frame, pixel * 2.0), [0.58, 0.58, 0.58]);
 }
 
-fn draw_player_arm(ui: &mut UiMeshBuilder, aspect: f32) {
-    for face in player_arm_overlay_faces(aspect) {
-        ui.quad(face.positions, face.color);
+fn aspect_for_rect(rect: UiRect) -> f32 {
+    (slot_height(rect) / slot_width(rect)).max(0.1)
+}
+
+fn draw_inventory_panel(ui: &mut UiMeshBuilder, kind: CraftingUiKind, aspect: f32) {
+    let panel = inventory_panel_rect(aspect);
+    ui.rect(panel, [0.03, 0.03, 0.03]);
+    ui.rect(
+        inset_rect(panel, panel_pixel(1.0, aspect)),
+        [0.78, 0.78, 0.78],
+    );
+    ui.rect(
+        inset_rect(panel, panel_pixel(3.0, aspect)),
+        [0.48, 0.48, 0.48],
+    );
+    ui.rect(
+        inset_rect(panel, panel_pixel(4.0, aspect)),
+        [0.76, 0.76, 0.76],
+    );
+
+    if kind == CraftingUiKind::Inventory {
+        ui.rect(gui_rect(27.0, 7.0, 51.0, 70.0, aspect), [0.01, 0.01, 0.01]);
+        for row in 0..4 {
+            draw_inventory_slot(
+                ui,
+                gui_rect(
+                    7.0,
+                    7.0 + row as f32 * GUI_SLOT_SIZE,
+                    GUI_SLOT_SIZE,
+                    GUI_SLOT_SIZE,
+                    aspect,
+                ),
+                false,
+            );
+        }
     }
+}
+
+fn draw_crafting_arrow(ui: &mut UiMeshBuilder, kind: CraftingUiKind, aspect: f32) {
+    let (x, y) = match kind {
+        CraftingUiKind::Inventory => (126.0, 40.0),
+        CraftingUiKind::Table => (90.0, 35.0),
+    };
+    let body = gui_rect(x, y, 14.0, 4.0, aspect);
+    let top = gui_rect(x + 10.0, y - 4.0, 4.0, 12.0, aspect);
+    let tip = [
+        [top.right, top.top, 0.0],
+        [
+            gui_rect(x + 18.0, y + 2.0, 1.0, 1.0, aspect).left,
+            body.bottom + slot_height(body) * 0.5,
+            0.0,
+        ],
+        [top.right, top.bottom, 0.0],
+        [top.right, top.bottom, 0.0],
+    ];
+    ui.rect(body, [0.55, 0.55, 0.55]);
+    ui.rect(top, [0.55, 0.55, 0.55]);
+    ui.quad(tip, [0.55, 0.55, 0.55]);
+}
+
+fn draw_stack_count(ui: &mut UiMeshBuilder, rect: UiRect, count: u16) {
+    let text = count.to_string();
+    let x = rect.right - slot_width(rect) * 0.38;
+    let y = rect.bottom + slot_height(rect) * 0.30;
+    ui.text(
+        x + slot_width(rect) * 0.04,
+        y - slot_height(rect) * 0.05,
+        0.0038,
+        [0.08, 0.08, 0.08],
+        &text,
+    );
+    ui.text(x, y, 0.0038, [1.0, 1.0, 1.0], &text);
 }
 
 pub(super) fn inventory_slot_rect(index: usize, inventory_open: bool, aspect: f32) -> UiRect {
     let slot_height = if inventory_open {
-        OPEN_INVENTORY_SLOT_HEIGHT
+        gui_slot_height()
     } else {
         CLOSED_HOTBAR_SLOT_HEIGHT
     };
@@ -331,17 +490,18 @@ pub(super) fn inventory_slot_rect(index: usize, inventory_open: bool, aspect: f3
     let gap_y = INVENTORY_GAP_Y;
     let gap_x = gap_y / aspect.max(0.1);
     if inventory_open {
-        let columns = 9;
-        let (row, column, top_start) = if index < INVENTORY_HOTBAR_SLOTS {
-            (0, index, -0.30)
+        let (source_x, source_y) = if index < INVENTORY_HOTBAR_SLOTS {
+            (8.0 + index as f32 * GUI_SLOT_SIZE, 142.0)
         } else {
             let inventory_index = index - INVENTORY_HOTBAR_SLOTS;
-            (inventory_index / columns, inventory_index % columns, 0.04)
+            let row = inventory_index / 9;
+            let column = inventory_index % 9;
+            (
+                8.0 + column as f32 * GUI_SLOT_SIZE,
+                84.0 + row as f32 * GUI_SLOT_SIZE,
+            )
         };
-        let total_width = columns as f32 * slot_width + (columns - 1) as f32 * gap_x;
-        let left = -total_width * 0.5 + column as f32 * (slot_width + gap_x);
-        let top = top_start - row as f32 * (slot_height + gap_y);
-        UiRect::new(left, top - slot_height, left + slot_width, top)
+        gui_rect(source_x, source_y, GUI_SLOT_SIZE, GUI_SLOT_SIZE, aspect)
     } else {
         let total_width = INVENTORY_HOTBAR_SLOTS as f32 * slot_width
             + (INVENTORY_HOTBAR_SLOTS - 1) as f32 * gap_x;
@@ -385,36 +545,56 @@ pub(super) fn crafting_result_slot_at_point(
 }
 
 pub(super) fn crafting_input_slot_rect(index: usize, kind: CraftingUiKind, aspect: f32) -> UiRect {
-    let slot_height = OPEN_INVENTORY_SLOT_HEIGHT;
-    let slot_width = slot_height / aspect.max(0.1);
-    let gap_y = INVENTORY_GAP_Y;
-    let gap_x = gap_y / aspect.max(0.1);
     let columns = match kind {
         CraftingUiKind::Inventory => 2,
         CraftingUiKind::Table => 3,
     };
     let row = index / columns;
     let column = index % columns;
-    let total_width = columns as f32 * slot_width + (columns - 1) as f32 * gap_x;
-    let left_start = -0.36 - total_width * 0.5;
-    let top_start = match kind {
-        CraftingUiKind::Inventory => 0.33,
-        CraftingUiKind::Table => 0.36,
+    let (left, top) = match kind {
+        CraftingUiKind::Inventory => (88.0, 26.0),
+        CraftingUiKind::Table => (30.0, 17.0),
     };
-    let left = left_start + column as f32 * (slot_width + gap_x);
-    let top = top_start - row as f32 * (slot_height + gap_y);
-    UiRect::new(left, top - slot_height, left + slot_width, top)
+    gui_rect(
+        left + column as f32 * GUI_SLOT_SIZE,
+        top + row as f32 * GUI_SLOT_SIZE,
+        GUI_SLOT_SIZE,
+        GUI_SLOT_SIZE,
+        aspect,
+    )
 }
 
 pub(super) fn crafting_result_slot_rect(kind: CraftingUiKind, aspect: f32) -> UiRect {
-    let slot_height = OPEN_INVENTORY_SLOT_HEIGHT;
-    let slot_width = slot_height / aspect.max(0.1);
-    let left = 0.24;
-    let top = match kind {
-        CraftingUiKind::Inventory => 0.33,
-        CraftingUiKind::Table => 0.31,
+    let (left, top) = match kind {
+        CraftingUiKind::Inventory => (144.0, 36.0),
+        CraftingUiKind::Table => (124.0, 35.0),
     };
-    UiRect::new(left, top - slot_height, left + slot_width, top)
+    gui_rect(left, top, GUI_SLOT_SIZE, GUI_SLOT_SIZE, aspect)
+}
+
+fn inventory_panel_rect(aspect: f32) -> UiRect {
+    let height = GUI_PANEL_HEIGHT;
+    let width = height * (GUI_SOURCE_WIDTH / GUI_SOURCE_HEIGHT) / aspect.max(0.1);
+    UiRect::new(-width * 0.5, -height * 0.5, width * 0.5, height * 0.5)
+}
+
+fn gui_slot_height() -> f32 {
+    GUI_PANEL_HEIGHT * GUI_SLOT_SIZE / GUI_SOURCE_HEIGHT
+}
+
+fn panel_pixel(pixels: f32, aspect: f32) -> f32 {
+    slot_height(gui_rect(0.0, 0.0, pixels, pixels, aspect))
+}
+
+fn gui_rect(x: f32, y: f32, width: f32, height: f32, aspect: f32) -> UiRect {
+    let panel = inventory_panel_rect(aspect);
+    let panel_width = slot_width(panel);
+    let panel_height = slot_height(panel);
+    let left = panel.left + panel_width * (x / GUI_SOURCE_WIDTH);
+    let right = panel.left + panel_width * ((x + width) / GUI_SOURCE_WIDTH);
+    let top = panel.top - panel_height * (y / GUI_SOURCE_HEIGHT);
+    let bottom = panel.top - panel_height * ((y + height) / GUI_SOURCE_HEIGHT);
+    UiRect::new(left, bottom, right, top)
 }
 
 fn inset_rect(rect: UiRect, inset: f32) -> UiRect {
@@ -468,6 +648,100 @@ fn push_held_item_mesh(
     }
 }
 
+fn push_player_hand_mesh(
+    texture_atlas: &TextureAtlas,
+    vertices: &mut Vec<Vertex>,
+    indices: &mut Vec<u32>,
+    aspect: f32,
+) {
+    let tile = texture_atlas.tile(&player_hand_texture_key());
+    for face in player_arm_overlay_faces(aspect) {
+        push_textured_ui_quad(vertices, indices, face.positions, tile, face.color);
+    }
+}
+
+fn push_item_icon_mesh(
+    world: &ClientWorld,
+    texture_atlas: &TextureAtlas,
+    vertices: &mut Vec<Vertex>,
+    indices: &mut Vec<u32>,
+    item: &ItemDefinition,
+    rect: UiRect,
+) {
+    if let Some(block) = item
+        .place_block
+        .as_ref()
+        .and_then(|key| world.blocks.get_by_key(key))
+        .map(|(_, block)| block)
+    {
+        push_slot_block_icon_mesh(vertices, indices, texture_atlas, block, rect);
+    } else {
+        push_textured_ui_rect(vertices, indices, rect, texture_atlas.tile(&item.texture));
+    }
+}
+
+fn push_slot_block_icon_mesh(
+    vertices: &mut Vec<Vertex>,
+    indices: &mut Vec<u32>,
+    texture_atlas: &TextureAtlas,
+    block: &crate::engine::world::BlockDefinition,
+    rect: UiRect,
+) {
+    let faces = slot_block_icon_faces(rect);
+    push_textured_ui_quad(
+        vertices,
+        indices,
+        faces.front,
+        texture_atlas.tile(&block.textures.south),
+        [0.90, 0.90, 0.90],
+    );
+    push_textured_ui_quad(
+        vertices,
+        indices,
+        faces.right,
+        texture_atlas.tile(&block.textures.east),
+        [0.66, 0.66, 0.66],
+    );
+    push_textured_ui_quad(
+        vertices,
+        indices,
+        faces.top,
+        texture_atlas.tile(&block.textures.top),
+        [1.0, 1.0, 1.0],
+    );
+}
+
+pub(super) struct SlotBlockIconFaces {
+    pub(super) front: [[f32; 3]; 4],
+    pub(super) right: [[f32; 3]; 4],
+    pub(super) top: [[f32; 3]; 4],
+}
+
+pub(super) fn slot_block_icon_faces(rect: UiRect) -> SlotBlockIconFaces {
+    let x = |factor: f32| rect.left + slot_width(rect) * factor;
+    let y = |factor: f32| rect.bottom + slot_height(rect) * factor;
+    SlotBlockIconFaces {
+        front: [
+            [x(0.22), y(0.58), 0.0],
+            [x(0.50), y(0.42), 0.0],
+            [x(0.50), y(0.13), 0.0],
+            [x(0.22), y(0.29), 0.0],
+        ],
+        right: [
+            [x(0.50), y(0.42), 0.0],
+            [x(0.78), y(0.58), 0.0],
+            [x(0.78), y(0.29), 0.0],
+            [x(0.50), y(0.13), 0.0],
+        ],
+        top: [
+            [x(0.22), y(0.58), 0.0],
+            [x(0.50), y(0.74), 0.0],
+            [x(0.78), y(0.58), 0.0],
+            [x(0.50), y(0.42), 0.0],
+        ],
+    }
+}
+
 fn push_held_block_mesh(
     vertices: &mut Vec<Vertex>,
     indices: &mut Vec<u32>,
@@ -509,11 +783,11 @@ pub(super) struct HeldBlockOverlayFaces {
 pub(super) fn held_block_overlay_faces(aspect: f32) -> HeldBlockOverlayFaces {
     let scale_x = 1.0 / aspect.max(0.1);
     let adjust = |x: f32, y: f32| [0.72 + (x - 0.72) * scale_x, y, 0.0];
-    let front_bottom_left = adjust(0.45, -0.96);
-    let front_bottom_right = adjust(0.82, -0.88);
-    let front_top_right = adjust(0.82, -0.50);
-    let front_top_left = adjust(0.45, -0.58);
-    let depth = |point: [f32; 3]| [point[0] + 0.15 * scale_x, point[1] + 0.14, 0.0];
+    let front_bottom_left = adjust(0.42, -1.08);
+    let front_bottom_right = adjust(1.04, -1.00);
+    let front_top_right = adjust(1.04, -0.58);
+    let front_top_left = adjust(0.42, -0.68);
+    let depth = |point: [f32; 3]| [point[0] + 0.30 * scale_x, point[1] + 0.14, 0.0];
     let back_top_left = depth(front_top_left);
     let back_top_right = depth(front_top_right);
     let back_bottom_right = depth(front_bottom_right);
@@ -548,12 +822,12 @@ pub(super) struct UiFace {
 
 pub(super) fn player_arm_overlay_faces(aspect: f32) -> [UiFace; 3] {
     let scale_x = 1.0 / aspect.max(0.1);
-    let adjust = |x: f32, y: f32| [0.78 + (x - 0.78) * scale_x, y, 0.0];
-    let wrist_left = adjust(0.64, -0.99);
-    let wrist_right = adjust(0.91, -0.99);
-    let elbow_left = adjust(0.56, -0.61);
-    let elbow_right = adjust(0.78, -0.49);
-    let depth = |point: [f32; 3]| [point[0] + 0.18 * scale_x, point[1] + 0.07, 0.0];
+    let adjust = |x: f32, y: f32| [0.80 + (x - 0.80) * scale_x, y, 0.0];
+    let wrist_left = adjust(0.74, -1.04);
+    let wrist_right = adjust(1.12, -1.02);
+    let elbow_left = adjust(0.58, -0.60);
+    let elbow_right = adjust(0.84, -0.47);
+    let depth = |point: [f32; 3]| [point[0] + 0.24 * scale_x, point[1] + 0.02, 0.0];
     let wrist_right_back = depth(wrist_right);
     let elbow_right_back = depth(elbow_right);
     let elbow_left_back = depth(elbow_left);
@@ -561,15 +835,15 @@ pub(super) fn player_arm_overlay_faces(aspect: f32) -> [UiFace; 3] {
     [
         UiFace {
             positions: [wrist_left, wrist_right, elbow_right, elbow_left],
-            color: [0.70, 0.46, 0.30],
+            color: [0.98, 0.92, 0.86],
         },
         UiFace {
             positions: [wrist_right, wrist_right_back, elbow_right_back, elbow_right],
-            color: [0.50, 0.31, 0.20],
+            color: [0.72, 0.58, 0.48],
         },
         UiFace {
             positions: [elbow_left, elbow_right, elbow_right_back, elbow_left_back],
-            color: [0.82, 0.57, 0.38],
+            color: [1.0, 0.96, 0.90],
         },
     ]
 }
@@ -645,4 +919,36 @@ fn push_textured_ui_quad(
         });
     }
     indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+}
+
+fn push_world_textured_quad(
+    vertices: &mut Vec<Vertex>,
+    indices: &mut Vec<u32>,
+    positions: [Vec3; 4],
+    tile: AtlasTile,
+    color: [f32; 3],
+) {
+    let tex_coords = tile.uv_quad();
+    let base = vertices.len() as u32;
+    for index in 0..4 {
+        vertices.push(Vertex {
+            position: positions[index].to_array(),
+            color,
+            tex_coords: tex_coords[index],
+        });
+    }
+    indices.extend_from_slice(&[
+        base,
+        base + 1,
+        base + 2,
+        base,
+        base + 2,
+        base + 3,
+        base + 2,
+        base + 1,
+        base,
+        base + 3,
+        base + 2,
+        base,
+    ]);
 }

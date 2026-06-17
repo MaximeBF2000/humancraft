@@ -10,10 +10,13 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::engine::world::{BlockId, CHUNK_VOLUME, Chunk, ChunkPosition, chunk::ChunkError};
+use crate::engine::world::{
+    BlockId, BlockRegistry, CHUNK_VOLUME, Chunk, ChunkPosition, chunk::ChunkError,
+};
 
 const METADATA_FILE: &str = "world.txt";
-const CHUNK_MAGIC: &[u8; 8] = b"HCCNK001";
+const LEGACY_RAW_ID_CHUNK_MAGIC: &[u8; 8] = b"HCCNK001";
+const CHUNK_MAGIC: &[u8; 8] = b"HCCNK002";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorldMetadata {
@@ -208,6 +211,7 @@ impl WorldSaveStore {
         &self,
         world_id: &str,
         position: ChunkPosition,
+        blocks: &BlockRegistry,
     ) -> Result<Option<Chunk>, WorldSaveError> {
         let path = self.chunk_path(world_id, position);
         if !path.exists() {
@@ -217,6 +221,13 @@ impl WorldSaveStore {
         let mut file = fs::File::open(path)?;
         let mut magic = [0_u8; 8];
         file.read_exact(&mut magic)?;
+        if &magic == LEGACY_RAW_ID_CHUNK_MAGIC {
+            eprintln!(
+                "ignoring legacy raw-id chunk {},{}; regenerating with keyed chunk format",
+                position.x, position.z
+            );
+            return Ok(None);
+        }
         if &magic != CHUNK_MAGIC {
             return Err(WorldSaveError::InvalidChunk("bad magic".to_string()));
         }
@@ -230,26 +241,87 @@ impl WorldSaveStore {
             )));
         }
 
-        let mut blocks = Vec::with_capacity(CHUNK_VOLUME);
-        for _ in 0..CHUNK_VOLUME {
-            blocks.push(BlockId::from(read_u32(&mut file)? as usize));
+        let palette_len = read_u16(&mut file)? as usize;
+        let mut palette = Vec::with_capacity(palette_len);
+        for _ in 0..palette_len {
+            let key_len = read_u16(&mut file)? as usize;
+            let mut key_bytes = vec![0_u8; key_len];
+            file.read_exact(&mut key_bytes)?;
+            let key = String::from_utf8(key_bytes)
+                .map_err(|_| WorldSaveError::InvalidChunk("invalid block key".to_string()))?;
+            let Some(block) = blocks.id_for_key(&key) else {
+                return Err(WorldSaveError::InvalidChunk(format!(
+                    "unknown saved block key {key}"
+                )));
+            };
+            palette.push(block);
+        }
+        if palette.is_empty() {
+            return Err(WorldSaveError::InvalidChunk(
+                "empty block palette".to_string(),
+            ));
         }
 
-        Ok(Some(Chunk::from_blocks(position, blocks)?))
+        let mut chunk_blocks = Vec::with_capacity(CHUNK_VOLUME);
+        for _ in 0..CHUNK_VOLUME {
+            let palette_index = read_u16(&mut file)? as usize;
+            let Some(block) = palette.get(palette_index).copied() else {
+                return Err(WorldSaveError::InvalidChunk(format!(
+                    "invalid block palette index {palette_index}"
+                )));
+            };
+            chunk_blocks.push(block);
+        }
+
+        Ok(Some(Chunk::from_blocks(position, chunk_blocks)?))
     }
 
-    pub fn save_chunk(&self, world_id: &str, chunk: &Chunk) -> Result<(), WorldSaveError> {
+    pub fn save_chunk(
+        &self,
+        world_id: &str,
+        chunk: &Chunk,
+        blocks: &BlockRegistry,
+    ) -> Result<(), WorldSaveError> {
         let path = self.chunk_path(world_id, chunk.position());
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
 
-        let mut bytes = Vec::with_capacity(CHUNK_MAGIC.len() + 8 + CHUNK_VOLUME * 4);
+        let (palette, palette_indices) = chunk_block_palette(chunk, blocks)?;
+        let palette_bytes: usize = palette
+            .iter()
+            .filter_map(|block| blocks.get(*block))
+            .map(|definition| 2 + definition.key.len())
+            .sum();
+        let mut bytes =
+            Vec::with_capacity(CHUNK_MAGIC.len() + 10 + palette_bytes + CHUNK_VOLUME * 2);
         bytes.extend_from_slice(CHUNK_MAGIC);
         bytes.extend_from_slice(&chunk.position().x.to_le_bytes());
         bytes.extend_from_slice(&chunk.position().z.to_le_bytes());
-        for block in chunk.blocks() {
-            bytes.extend_from_slice(&(block.raw() as u32).to_le_bytes());
+        bytes.extend_from_slice(
+            &u16::try_from(palette.len())
+                .map_err(|_| WorldSaveError::InvalidChunk("block palette too large".to_string()))?
+                .to_le_bytes(),
+        );
+        for block in &palette {
+            let definition = blocks.get(*block).ok_or_else(|| {
+                WorldSaveError::InvalidChunk(format!("unknown block id {}", block.raw()))
+            })?;
+            let key_bytes = definition.key.as_bytes();
+            bytes.extend_from_slice(
+                &u16::try_from(key_bytes.len())
+                    .map_err(|_| {
+                        WorldSaveError::InvalidChunk(format!(
+                            "block key too long {}",
+                            definition.key
+                        ))
+                    })?
+                    .to_le_bytes(),
+            );
+            bytes.extend_from_slice(key_bytes);
+        }
+        for palette_index in palette_indices {
+            bytes.extend_from_slice(&palette_index.to_le_bytes());
         }
         let mut file = fs::File::create(path)?;
         file.write_all(&bytes)?;
@@ -407,10 +479,40 @@ fn read_i32(reader: &mut impl Read) -> Result<i32, WorldSaveError> {
     Ok(i32::from_le_bytes(bytes))
 }
 
-fn read_u32(reader: &mut impl Read) -> Result<u32, WorldSaveError> {
-    let mut bytes = [0_u8; 4];
+fn read_u16(reader: &mut impl Read) -> Result<u16, WorldSaveError> {
+    let mut bytes = [0_u8; 2];
     reader.read_exact(&mut bytes)?;
-    Ok(u32::from_le_bytes(bytes))
+    Ok(u16::from_le_bytes(bytes))
+}
+
+fn chunk_block_palette(
+    chunk: &Chunk,
+    blocks: &BlockRegistry,
+) -> Result<(Vec<BlockId>, Vec<u16>), WorldSaveError> {
+    let mut palette = Vec::new();
+    let mut indices = Vec::with_capacity(CHUNK_VOLUME);
+    let mut block_to_palette = std::collections::HashMap::new();
+
+    for block in chunk.blocks() {
+        if blocks.get(*block).is_none() {
+            return Err(WorldSaveError::InvalidChunk(format!(
+                "unknown block id {}",
+                block.raw()
+            )));
+        }
+        let palette_index = if let Some(index) = block_to_palette.get(block).copied() {
+            index
+        } else {
+            let index = u16::try_from(palette.len())
+                .map_err(|_| WorldSaveError::InvalidChunk("block palette too large".to_string()))?;
+            palette.push(*block);
+            block_to_palette.insert(*block, index);
+            index
+        };
+        indices.push(palette_index);
+    }
+
+    Ok((palette, indices))
 }
 
 fn sanitize_display_name(name: &str) -> String {
@@ -484,13 +586,23 @@ fn unix_now_seconds() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::world::{BlockPosition, Chunk};
+    use crate::engine::world::{BlockDefinition, BlockPosition, Chunk};
 
     fn temp_save_root(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
             "humancraft-save-test-{name}-{}",
             std::process::id()
         ))
+    }
+
+    fn test_blocks(keys: &[&str]) -> BlockRegistry {
+        let mut blocks = BlockRegistry::new();
+        for key in keys {
+            blocks
+                .register(BlockDefinition::new(*key, *key))
+                .expect("test block keys should be unique");
+        }
+        blocks
     }
 
     #[test]
@@ -554,21 +666,98 @@ mod tests {
         let metadata = store
             .create_world("Chunk Test", 7, PlayerSave::new(0.0, 0.0, 0.0, 0.0, 0.0))
             .unwrap();
-        let stone = BlockId::from(3);
-        let mut chunk = Chunk::filled(ChunkPosition { x: -1, z: 2 }, BlockId::from(0));
+        let blocks = test_blocks(&["test:air", "test:stone"]);
+        let air = blocks.id_for_key("test:air").unwrap();
+        let stone = blocks.id_for_key("test:stone").unwrap();
+        let mut chunk = Chunk::filled(ChunkPosition { x: -1, z: 2 }, air);
         chunk
             .set_block(BlockPosition { x: 15, y: 64, z: 0 }, stone)
             .unwrap();
 
-        store.save_chunk(&metadata.id, &chunk).unwrap();
+        store.save_chunk(&metadata.id, &chunk, &blocks).unwrap();
         let loaded = store
-            .load_chunk(&metadata.id, ChunkPosition { x: -1, z: 2 })
+            .load_chunk(&metadata.id, ChunkPosition { x: -1, z: 2 }, &blocks)
             .unwrap()
             .unwrap();
 
         assert_eq!(
             loaded.block(BlockPosition { x: 15, y: 64, z: 0 }),
             Some(stone)
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn chunk_files_resolve_blocks_by_key_not_registry_order() {
+        let root = temp_save_root("chunk-keyed");
+        let _ = fs::remove_dir_all(&root);
+        let store = WorldSaveStore::new(&root);
+        let metadata = store
+            .create_world(
+                "Keyed Chunk Test",
+                7,
+                PlayerSave::new(0.0, 0.0, 0.0, 0.0, 0.0),
+            )
+            .unwrap();
+        let old_blocks = test_blocks(&["test:air", "test:stone"]);
+        let old_air = old_blocks.id_for_key("test:air").unwrap();
+        let old_stone = old_blocks.id_for_key("test:stone").unwrap();
+        let mut chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, old_air);
+        chunk
+            .set_block(BlockPosition { x: 2, y: 3, z: 4 }, old_stone)
+            .unwrap();
+
+        store.save_chunk(&metadata.id, &chunk, &old_blocks).unwrap();
+
+        let new_blocks = test_blocks(&["test:stone", "test:air"]);
+        let loaded = store
+            .load_chunk(&metadata.id, ChunkPosition { x: 0, z: 0 }, &new_blocks)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            loaded.block(BlockPosition { x: 2, y: 3, z: 4 }),
+            new_blocks.id_for_key("test:stone")
+        );
+        assert_eq!(
+            loaded.block(BlockPosition { x: 0, y: 0, z: 0 }),
+            new_blocks.id_for_key("test:air")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn legacy_raw_id_chunks_are_ignored_for_regeneration() {
+        let root = temp_save_root("chunk-legacy");
+        let _ = fs::remove_dir_all(&root);
+        let store = WorldSaveStore::new(&root);
+        let metadata = store
+            .create_world(
+                "Legacy Chunk Test",
+                7,
+                PlayerSave::new(0.0, 0.0, 0.0, 0.0, 0.0),
+            )
+            .unwrap();
+        let position = ChunkPosition { x: 3, z: -2 };
+        let path = store.chunk_path(&metadata.id, position);
+        let mut bytes = Vec::with_capacity(LEGACY_RAW_ID_CHUNK_MAGIC.len() + 8 + CHUNK_VOLUME * 4);
+        bytes.extend_from_slice(LEGACY_RAW_ID_CHUNK_MAGIC);
+        bytes.extend_from_slice(&position.x.to_le_bytes());
+        bytes.extend_from_slice(&position.z.to_le_bytes());
+        for _ in 0..CHUNK_VOLUME {
+            bytes.extend_from_slice(&0_u32.to_le_bytes());
+        }
+        fs::write(path, bytes).unwrap();
+
+        let blocks = test_blocks(&["test:air"]);
+
+        assert!(
+            store
+                .load_chunk(&metadata.id, position, &blocks)
+                .unwrap()
+                .is_none()
         );
 
         let _ = fs::remove_dir_all(root);

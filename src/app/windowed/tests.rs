@@ -340,7 +340,9 @@ fn saved_chunks_override_generation_when_streaming() {
             content.block_ids.diamond_ore,
         )
         .unwrap();
-    store.save_chunk(&metadata.id, &saved_chunk).unwrap();
+    store
+        .save_chunk(&metadata.id, &saved_chunk, &content.blocks)
+        .unwrap();
 
     let mut world = ClientWorld::new(
         content.blocks.clone(),
@@ -633,6 +635,26 @@ fn inventory_slots_are_square_in_screen_pixels() {
 }
 
 #[test]
+fn inventory_block_icons_use_three_visible_faces_inside_slot() {
+    let rect = inventory_slot_rect(0, true, 16.0 / 9.0);
+    let faces = slot_block_icon_faces(rect);
+    let all_faces = [faces.front, faces.right, faces.top];
+
+    for face in all_faces {
+        assert!(quad_area(face) > 0.0001);
+        for [x, y, _] in face {
+            assert!((rect.left..=rect.right).contains(&x));
+            assert!((rect.bottom..=rect.top).contains(&y));
+        }
+    }
+    assert_eq!(faces.front[0], faces.top[0]);
+    assert_eq!(faces.front[1], faces.top[3]);
+    assert_eq!(faces.right[0], faces.front[1]);
+    assert_eq!(faces.right[1], faces.top[2]);
+    assert_eq!(faces.right[3], faces.front[2]);
+}
+
+#[test]
 fn full_inventory_layout_keeps_crafting_and_player_slots_separate() {
     for aspect in [4.0 / 3.0, 16.0 / 9.0] {
         let player_slots: Vec<_> = (0..Inventory::player().slot_count())
@@ -698,8 +720,8 @@ fn held_block_overlay_uses_three_visible_faces() {
     for face in all_faces {
         assert!(quad_area(face) > 0.002);
         for [x, y, _] in face {
-            assert!((-1.0..=1.0).contains(&x));
-            assert!((-1.0..=1.0).contains(&y));
+            assert!((-1.0..=1.15).contains(&x));
+            assert!((-1.15..=1.0).contains(&y));
         }
     }
     assert_eq!(faces.front[1], faces.right[0]);
@@ -734,9 +756,9 @@ fn held_block_overlay_is_framed_like_a_first_person_held_block() {
         .map(|point| point[1])
         .fold(f32::MIN, f32::max);
 
-    assert!(min_x > 0.55);
-    assert!(max_x < 0.90);
-    assert!(min_y < -0.90);
+    assert!(min_x > 0.50);
+    assert!(max_x > 1.0);
+    assert!(min_y < -1.0);
     assert!(max_y > -0.45);
 }
 
@@ -747,8 +769,8 @@ fn player_arm_overlay_uses_three_visible_faces() {
     for face in faces {
         assert!(quad_area(face.positions) > 0.002);
         for [x, y, _] in face.positions {
-            assert!((-1.0..=1.0).contains(&x));
-            assert!((-1.0..=1.0).contains(&y));
+            assert!((-1.0..=1.12).contains(&x));
+            assert!((-1.10..=1.0).contains(&y));
         }
     }
 }
@@ -1241,6 +1263,22 @@ fn every_registered_item_uses_loadable_texture() {
             definition.texture
         );
     }
+}
+
+#[test]
+fn destroy_stage_overlay_textures_load() {
+    for stage in 0..=9 {
+        let key = destroy_stage_texture_key(stage);
+        assert!(
+            load_texture_pixels(&key).is_some(),
+            "destroy overlay {key} should load"
+        );
+    }
+}
+
+#[test]
+fn player_hand_overlay_texture_loads() {
+    assert!(load_texture_pixels(&player_hand_texture_key()).is_some());
 }
 
 #[test]

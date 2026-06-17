@@ -10,8 +10,9 @@ features do not accumulate in the event-loop shell.
   `RenderState` storage, and application-handler wiring.
 - `src/app/windowed/app_input.rs`: keyboard, mouse, pause, inventory/crafting
   cursor, and held block interaction handling for `RenderState`.
-- `src/app/windowed/block_break_overlay.rs`: Minecraft-style staged block
-  damage mask generation as 16 x 16 pixel quads for the current break target.
+- `src/app/windowed/block_break_overlay.rs`: textured block damage overlay
+  mesh generation using the default `destroy_stage_0` through
+  `destroy_stage_9` textures for the current break target.
 - `src/app/windowed/camera.rs`: player camera orientation, fixed-tick movement,
   collision-driven movement, sprinting, sneaking, and save conversion.
 - `src/app/windowed/client_world.rs`: loaded client chunks, save-backed chunk
@@ -39,7 +40,8 @@ features do not accumulate in the event-loop shell.
 - `src/app/windowed/shaders.rs`: WGSL source strings used by the current
   renderer pipelines.
 - `src/app/windowed/texture.rs`: renderer-side texture atlas construction,
-  texture-key resolution, fallback pixels, and depth texture creation.
+  texture-key resolution for blocks, items, destroy overlays, and the
+  first-person hand overlay, fallback pixels, and depth texture creation.
 - `src/app/windowed/ui.rs`: menu UI primitives, menu hit targets, and menu mesh
   construction.
 - `src/app/windowed/ui_builder.rs`: reusable solid-color UI mesh builder and

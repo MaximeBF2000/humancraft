@@ -122,7 +122,14 @@ pub fn register_blocks(blocks: &mut BlockRegistry) -> Result<BlockIds, RegistryE
             .hardness(2.5)
             .drops(["humancraft:crafting_table"])
             .tags(["wood", "utility", "crafting_table"])
-            .textures(BlockTextures::all("humancraft:block/crafting_table/top")),
+            .textures(BlockTextures {
+                top: "humancraft:block/crafting_table/top".to_string(),
+                bottom: "humancraft:block/crafting_table/bottom".to_string(),
+                north: "humancraft:block/crafting_table/front".to_string(),
+                south: "humancraft:block/crafting_table/back".to_string(),
+                east: "humancraft:block/crafting_table/right".to_string(),
+                west: "humancraft:block/crafting_table/left".to_string(),
+            }),
     )?;
     let sand = blocks.register(
         BlockDefinition::new("humancraft:sand", "Sand")
@@ -136,7 +143,11 @@ pub fn register_blocks(blocks: &mut BlockRegistry) -> Result<BlockIds, RegistryE
             .hardness(0.8)
             .drops(["humancraft:sandstone"])
             .tags(["terrain", "stone", "ore_host"])
-            .textures(BlockTextures::all("humancraft:block/sandstone/top")),
+            .textures(BlockTextures::top_bottom_sides(
+                "humancraft:block/sandstone/top",
+                "humancraft:block/sandstone/bottom",
+                "humancraft:block/sandstone/front",
+            )),
     )?;
     let bedrock = blocks.register(
         BlockDefinition::new("humancraft:bedrock", "Bedrock")

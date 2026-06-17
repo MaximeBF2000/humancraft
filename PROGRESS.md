@@ -1,6 +1,6 @@
 # HumanCraft Progress
 
-Last updated: 2026-06-14
+Last updated: 2026-06-16
 
 ## Done
 
@@ -412,9 +412,70 @@ Last updated: 2026-06-14
   and flush them on `Save & Quit` or window close, avoiding frame drops from
   file writes during rendering/update.
 - Buffered chunk-file writes into one byte buffer per chunk during flush.
+- Replaced the active block, ore, resource, and sapling PNGs with matching
+  default resource-pack artwork under `textures/blocks` and `textures/items`.
+- Pre-tinted grayscale default grass-top and oak-leaf masks because the current
+  renderer does not yet apply biome color maps.
+- Registered distinct sandstone top/bottom/side textures and crafting-table
+  top/bottom/front/side textures instead of using one face for every side.
+- Changed inventory slot chrome and stack counts toward Minecraft-style gray
+  beveled slots with dark count shadows.
+- Changed inventory and crafting block item icons to render as small three-face
+  block meshes using the same block textures as world rendering.
+- Updated item/inventory rendering docs and added regression coverage for
+  three-face inventory block icon geometry.
+- Added `docs/generating_textures.md` with the default resource-pack import
+  workflow, tint-mask handling, block/item/gui guidance, and verification
+  expectations.
+- Changed chunk saves from raw block IDs to keyed block palettes using
+  `HCCNK002`, so saved worlds survive block registration order changes.
+- Ignored legacy `HCCNK001` raw-ID chunk files and regenerated them from the
+  world seed, preventing old saved chunks from showing diamond-ore trunks,
+  log canopies, or wood-textured terrain after content IDs shift.
+- Queued initially streamed chunks for save so `Save & Quit` writes the current
+  keyed chunk format after loading or regenerating legacy chunks.
+- Reworked the open inventory and crafting table UI layout around the original
+  176 x 166 Minecraft container coordinates for closer panel, slot, crafting,
+  result, and hotbar placement.
+- Updated world-save and inventory rendering docs and added regression coverage
+  for keyed chunk save/load and legacy raw-ID chunk regeneration.
+- Tightened inventory slot bevel rendering to one-to-two-pixel source-style
+  edges instead of percentage-thick nested rectangles.
+- Reworked inventory block item icons to use a centered isometric block
+  projection so block stacks no longer look stretched or skewed.
+- Changed dropped placeable block loot to render as small rotating textured
+  cubes while keeping non-block item loot as flat rotating sprites.
+- Imported `destroy_stage_0.png` through `destroy_stage_9.png` into
+  `textures/overlays` and changed block breaking to render those real staged
+  damage textures instead of procedural crack pixels.
+- Added a textured world-overlay render pipeline for block damage overlays and
+  regression coverage for destroy-stage texture loading and stage selection.
+- Added `textures/overlays/player_hand.png` as the first-person empty-hand
+  texture and registered it in the renderer atlas.
+- Changed the empty selected hotbar slot to render a textured lower-right
+  player hand through the textured UI pass instead of a flat-color arm mesh.
+- Enlarged and lowered selected block rendering so placeable hotbar blocks sit
+  partially off-screen in the lower-right first-person view, closer to the
+  Minecraft held-block framing.
+- Added regression coverage for the player-hand overlay texture and updated
+  held block/hand projection tests for the larger first-person framing.
 
 ## Verified
 
+- `cargo fmt` after tightening inventory slots, block icons, block loot, and
+  destroy overlays.
+- `cargo test` after tightening inventory slots, block icons, block loot, and
+  destroy overlays.
+- `cargo fmt` after adding the textured first-person hand and selected-block
+  overlay framing.
+- `cargo test` after adding the textured first-person hand and selected-block
+  overlay framing.
+- `cargo fmt` after documenting texture generation, fixing keyed chunk saves,
+  and reworking the inventory layout.
+- `cargo test` after documenting texture generation, fixing keyed chunk saves,
+  and reworking the inventory layout.
+- `cargo fmt` after importing default-pack textures and adjusting inventory UI.
+- `cargo test` after importing default-pack textures and adjusting inventory UI.
 - `cargo fmt` after splitting content and windowed-client modules.
 - `cargo check` after splitting content and windowed-client modules.
 - `cargo test` after splitting content and windowed-client modules.

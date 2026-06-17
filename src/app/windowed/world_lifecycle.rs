@@ -228,6 +228,9 @@ impl RenderState {
         self.chunk_buffers.clear();
         self.pending_chunk_remeshes.clear();
         self.dirty_save_chunks.clear();
+        for chunk_position in &generated_chunks {
+            self.dirty_save_chunks.insert(*chunk_position);
+        }
         self.player_state_dirty = false;
         self.inventory_cursor = None;
         self.inventory_drag = None;
@@ -284,7 +287,8 @@ impl RenderState {
             let dirty_chunks: Vec<_> = self.dirty_save_chunks.iter().copied().collect();
             for chunk_position in dirty_chunks {
                 if let Some(chunk) = world.chunks.get(&chunk_position) {
-                    if let Err(error) = self.save_store.save_chunk(&world_id, chunk) {
+                    if let Err(error) = self.save_store.save_chunk(&world_id, chunk, &world.blocks)
+                    {
                         self.report_save_error(error);
                     }
                 }

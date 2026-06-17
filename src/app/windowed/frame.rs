@@ -271,8 +271,9 @@ impl RenderState {
                 }
 
                 if self.block_break_index_count > 0 {
-                    pass.set_pipeline(&self.solid_world_overlay_pipeline);
+                    pass.set_pipeline(&self.textured_world_overlay_pipeline);
                     pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                    pass.set_bind_group(1, &self.texture_bind_group, &[]);
                     pass.set_vertex_buffer(0, self.block_break_vertex_buffer.slice(..));
                     pass.set_index_buffer(
                         self.block_break_index_buffer.slice(..),
@@ -383,7 +384,11 @@ impl RenderState {
             .as_ref()
             .and_then(|world| world.block_break_progress());
         if let Some(progress) = break_progress {
-            let mesh = build_block_break_overlay_mesh(progress.target, progress.ratio);
+            let mesh = build_block_break_overlay_mesh(
+                progress.target,
+                progress.ratio,
+                &self.texture_atlas,
+            );
             self.queue.write_buffer(
                 &self.block_break_vertex_buffer,
                 0,

@@ -9,6 +9,42 @@ status file for verification notes, next steps, and implementation details.
 
 - Read the project PRD, development philosophy, and progress notes before
   continuing implementation.
+- Added `docs/generating_textures.md` to document importing accurate block,
+  item, mob, and UI textures from the default resource pack, including current
+  grass/foliage tint-mask handling.
+- Changed chunk persistence to an `HCCNK002` block-key palette format and made
+  legacy raw-ID chunks regenerate from the world seed, fixing saved worlds that
+  could show diamond-ore tree trunks, log canopies, or wrong terrain blocks
+  after content registration order changed.
+- Queued initially streamed chunks for save so loading and saving a world
+  rewrites chunks in the keyed format.
+- Reworked the open inventory and crafting table overlay around the original
+  176 x 166 Minecraft container coordinates for closer panel, slot, crafting,
+  result, and hotbar placement.
+- Tightened inventory slot bevels to source-pixel-like edges and changed block
+  item icons to a centered isometric projection so block stacks no longer look
+  stretched in the inventory or crafting table.
+- Changed dropped placeable block loot to render as small rotating textured
+  cubes while non-block item drops remain flat rotating sprites.
+- Replaced the procedural block-breaking crack pattern with the original
+  `destroy_stage_0` through `destroy_stage_9` textures loaded from
+  `textures/overlays`.
+- Added a generated `textures/overlays/player_hand.png` first-person hand
+  texture, registered it in the atlas, and render the empty selected hotbar
+  slot through the textured UI pass.
+- Enlarged and lowered the selected hotbar block overlay so placeable blocks
+  sit partially off-screen in the lower-right first-person view, matching the
+  Minecraft-style held-block framing more closely.
+- Replaced current block, ore, item-resource, and sapling texture PNGs with
+  matching default resource-pack artwork, with pre-tinted grass-top and
+  oak-leaf masks for the renderer's current no-biome-tint path.
+- Registered proper multi-face texture metadata for sandstone and crafting
+  tables so their world and held-block rendering use distinct top, side,
+  bottom, and front faces where available.
+- Updated inventory and crafting item rendering so placeable block stacks draw
+  as small three-face block meshes while non-block items remain flat sprites.
+- Restyled inventory slot frames and stack counts toward Minecraft-like gray
+  beveled slots with dark count shadows.
 - Generated and added stone block face textures under `textures/blocks/stone`
   with the `create-block-texture` skill.
 - Added block texture metadata through `BlockTextures` and registered texture

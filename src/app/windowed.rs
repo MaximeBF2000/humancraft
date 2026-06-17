@@ -64,14 +64,18 @@ use inventory_ui::{
 #[cfg(test)]
 use inventory_ui::{
     crafting_input_slot_rect, crafting_result_slot_rect, held_block_overlay_faces,
-    inventory_slot_rect, loot_billboard_corners, player_arm_overlay_faces, slot_height, slot_width,
+    inventory_slot_rect, loot_billboard_corners, player_arm_overlay_faces, slot_block_icon_faces,
+    slot_height, slot_width,
 };
 use render_types::{CameraUniform, Vertex};
 use session::{AppMode, ConfigField, HeldBlockInteraction, NewWorldConfig, TextEntry};
 use spatial::{WorldBlockPosition, chunk_position_for_render_position};
 use texture::{Texture, TextureAtlas};
 #[cfg(test)]
-use texture::{block_texture_keys, load_texture_pixels, texture_key_for_direction, texture_path};
+use texture::{
+    block_texture_keys, destroy_stage_texture_key, load_texture_pixels, player_hand_texture_key,
+    texture_key_for_direction, texture_path,
+};
 use ui::{
     UI_CONFIG_BACK, UI_CONFIG_CREATE, UI_CONFIG_NAME_FIELD, UI_CONFIG_SEED_FIELD, UI_MAIN_PLAY,
     UI_PAUSE_KEEP_PLAYING, UI_PAUSE_SAVE_QUIT, UI_RENAME_BACK, UI_RENAME_SAVE, UI_WORLDS_BACK,
@@ -192,7 +196,7 @@ struct RenderState {
     ui_pipeline: wgpu::RenderPipeline,
     textured_ui_pipeline: wgpu::RenderPipeline,
     line_pipeline: wgpu::RenderPipeline,
-    solid_world_overlay_pipeline: wgpu::RenderPipeline,
+    textured_world_overlay_pipeline: wgpu::RenderPipeline,
     texture_atlas: TextureAtlas,
     texture_bind_group: wgpu::BindGroup,
     camera_buffer: wgpu::Buffer,
@@ -535,22 +539,22 @@ impl RenderState {
             multiview: None,
             cache: None,
         });
-        let solid_world_overlay_pipeline =
+        let textured_world_overlay_pipeline =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("HumanCraft Solid World Overlay Pipeline"),
-                layout: Some(&line_pipeline_layout),
+                label: Some("HumanCraft Textured World Overlay Pipeline"),
+                layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
-                    module: &line_shader,
+                    module: &shader,
                     entry_point: Some("vs_main"),
                     buffers: &[Vertex::layout()],
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
-                    module: &line_shader,
+                    module: &shader,
                     entry_point: Some("fs_main"),
                     targets: &[Some(wgpu::ColorTargetState {
                         format: config.format,
-                        blend: Some(wgpu::BlendState::REPLACE),
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -627,7 +631,7 @@ impl RenderState {
             ui_pipeline,
             textured_ui_pipeline,
             line_pipeline,
-            solid_world_overlay_pipeline,
+            textured_world_overlay_pipeline,
             texture_atlas,
             texture_bind_group,
             camera_buffer,

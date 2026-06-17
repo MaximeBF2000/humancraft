@@ -101,16 +101,23 @@ Block and item textures share the renderer-side texture atlas. Item definitions
 use `humancraft:item/<name>` texture keys that resolve to
 `textures/items/<name>.png`.
 
-The flat UI pass renders slot frames and stack counts. Inventory slots are sized
-with the window aspect ratio so they are square in screen pixels. A textured UI
-pass draws item icons. Dropped loot renders as double-sided textured quads in
-the world pass so depth testing works against terrain.
+The flat UI pass lays out the open inventory and crafting table from the
+original 176 x 166 container texture coordinates, then renders Minecraft-style
+slot frames with one-to-two-pixel bevels and stack counts with a small dark text
+shadow. Inventory slots are sized with the window aspect ratio so they are
+square in screen pixels. A textured UI pass draws non-block item icons as
+sprites and placeable block item icons as small isometric block meshes using
+the block's south/east/top textures. Dropped loot renders non-block items as
+double-sided textured quads, while placeable block drops render as small
+rotating cubes with block face textures.
 
-When no hotbar item is selected, gameplay renders a shaded three-face
-lower-right player arm overlay. When a stack is selected, placeable block items
-render as a larger lower-right projected block with front/right/top cube faces
-using the block's south/east/top textures in the first-person overlay.
-Non-block items render as angled item sprites.
+When no hotbar item is selected, gameplay renders a textured three-face
+lower-right player hand overlay from `textures/overlays/player_hand.png`. When
+a stack is selected, placeable block items render as a larger lower-right
+projected block with front/right/top cube faces using the block's
+south/east/top textures in the first-person overlay. The held block is allowed
+to extend beyond the bottom-right screen edge so it reads like Minecraft's
+first-person held-block framing. Non-block items render as angled item sprites.
 
 ## Tests
 
@@ -123,6 +130,7 @@ Keep regression coverage focused on player-facing behavior and data integrity:
 - stone-dropped cobblestone placement
 - held block and arm overlay geometry staying visible, non-degenerate, and
   framed in the lower-right first-person view
+- player hand overlay texture loading
 - held block interaction repeat cadence
 - block drops resolving to registered items
 - breaking blocks spawning configured loot
