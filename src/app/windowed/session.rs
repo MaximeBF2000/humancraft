@@ -61,6 +61,38 @@ pub(super) const SHORTCUT_ACTIONS: [ShortcutAction; 20] = [
 ];
 
 impl ShortcutAction {
+    pub(super) const fn key(self) -> &'static str {
+        match self {
+            Self::MoveForward => "move_forward",
+            Self::MoveBackward => "move_backward",
+            Self::MoveLeft => "move_left",
+            Self::MoveRight => "move_right",
+            Self::Jump => "jump",
+            Self::Sneak => "crouch",
+            Self::Inventory => "inventory",
+            Self::Pause => "pause",
+            Self::Drop => "drop",
+            Self::HotbarPrevious => "hotbar_previous",
+            Self::HotbarNext => "hotbar_next",
+            Self::Hotbar1 => "hotbar_1",
+            Self::Hotbar2 => "hotbar_2",
+            Self::Hotbar3 => "hotbar_3",
+            Self::Hotbar4 => "hotbar_4",
+            Self::Hotbar5 => "hotbar_5",
+            Self::Hotbar6 => "hotbar_6",
+            Self::Hotbar7 => "hotbar_7",
+            Self::Hotbar8 => "hotbar_8",
+            Self::Hotbar9 => "hotbar_9",
+        }
+    }
+
+    pub(super) fn from_key(key: &str) -> Option<Self> {
+        SHORTCUT_ACTIONS
+            .iter()
+            .copied()
+            .find(|action| action.key() == key)
+    }
+
     pub(super) const fn label(self) -> &'static str {
         match self {
             Self::MoveForward => "MOVE FORWARD",
@@ -157,6 +189,13 @@ impl KeyBindings {
 
     pub(super) fn matches(&self, action: ShortcutAction, label: &str) -> bool {
         self.label(action).eq_ignore_ascii_case(label)
+    }
+
+    pub(super) fn iter(&self) -> impl Iterator<Item = (ShortcutAction, &str)> {
+        SHORTCUT_ACTIONS
+            .iter()
+            .copied()
+            .map(|action| (action, self.label(action)))
     }
 }
 

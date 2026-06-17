@@ -18,7 +18,8 @@ World management controls:
 - New world config: edit world name and seed on the same screen. `Tab` switches
   fields, `Enter` creates the world, and a blank seed uses an automatic seed.
 - Main menu Settings: open the shortcuts screen and click an action row, then
-  press a key to change that shortcut for the current session.
+  press a key to change that shortcut. Shortcut changes are saved and reused
+  next time the game starts.
 
 In-game controls:
 
@@ -42,8 +43,7 @@ In-game controls:
 - `E`: open or close the inventory overlay
 - `Esc`: open the pause overlay. `Keep Playing` resumes. `Save & Quit` flushes
   player state, inventory, and edited chunks to disk, then returns to the main
-  menu. The pause overlay also has Settings for changing shortcuts during the
-  current session.
+  menu. The pause overlay also has Settings for changing shortcuts.
 
 The hotbar is always visible at the bottom of the gameplay view. It shows the
 first nine inventory slots and item stack counts. One slot is selected at a

@@ -38,6 +38,7 @@ mod loot;
 mod player_collision;
 mod render_types;
 mod session;
+mod settings;
 mod shaders;
 mod spatial;
 mod texture;
@@ -75,6 +76,7 @@ use session::{
     AppMode, ConfigField, HeldBlockInteraction, KeyBindings, NewWorldConfig, SHORTCUT_ACTIONS,
     ShortcutAction, TextEntry,
 };
+use settings::SettingsStore;
 use spatial::{WorldBlockPosition, chunk_position_for_render_position};
 use texture::{Texture, TextureAtlas};
 #[cfg(test)]
@@ -223,6 +225,7 @@ struct RenderState {
     camera: Camera,
     world: Option<ClientWorld>,
     save_store: WorldSaveStore,
+    settings_store: SettingsStore,
     worlds: Vec<WorldMetadata>,
     active_world: Option<WorldMetadata>,
     mode: AppMode,
@@ -633,6 +636,8 @@ impl RenderState {
             eprintln!("{error}");
             Vec::new()
         });
+        let settings_store = SettingsStore::default();
+        let key_bindings = settings_store.load_key_bindings();
 
         Self {
             window,
@@ -664,13 +669,14 @@ impl RenderState {
             camera,
             world: None,
             save_store,
+            settings_store,
             worlds,
             active_world: None,
             mode: AppMode::MainMenu,
             selected_world: 0,
             text_entry: TextEntry::default(),
             new_world_config: NewWorldConfig::default(),
-            key_bindings: KeyBindings::default(),
+            key_bindings,
             settings_return_to_pause: false,
             rebinding_shortcut: None,
             dirty_save_chunks: HashSet::new(),

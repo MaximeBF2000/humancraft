@@ -33,8 +33,10 @@ features do not accumulate in the event-loop shell.
 - `src/app/windowed/render_types.rs`: shared GPU vertex and camera-uniform
   structs.
 - `src/app/windowed/session.rs`: app mode, world-name text entry, new-world
-  config state, runtime shortcut bindings, settings/shortcut menu state, and
-  held block interaction cadence.
+  config state, shortcut binding data, settings/shortcut menu state, and held
+  block interaction cadence.
+- `src/app/windowed/settings.rs`: durable client settings storage for shortcut
+  bindings under `saves/settings.txt`.
 - `src/app/windowed/spatial.rs`: render/world coordinate conversion, world block
   positions, player AABB construction, and chunk-neighbor dirtying helpers.
 - `src/app/windowed/loot.rs`: dropped item spawning, gravity/drag updates, block
@@ -72,8 +74,8 @@ features do not accumulate in the event-loop shell.
 - Keep constants explicit. If a value affects player-facing behavior, update
   player and developer docs when changing it.
 - Keep keyboard shortcut behavior routed through `KeyBindings` instead of
-  adding new hardcoded logical-key checks. The current shortcut editor is
-  runtime-only; add a dedicated settings save file before promising persistence.
+  adding new hardcoded logical-key checks. Persist shortcut changes through
+  `SettingsStore`, not world metadata.
 - Keep files under 250 lines by default. If a file is already over that limit,
   extract a cohesive responsibility before adding more behavior to it.
 - Prefer moving cohesive private helpers into a module before adding more

@@ -9,6 +9,7 @@ impl RenderState {
                 && let Some(label) = shortcut_label_for_event(event)
             {
                 self.key_bindings.set_label(action, label);
+                self.settings_store.save_key_bindings(&self.key_bindings);
                 self.rebinding_shortcut = None;
                 self.update_window_title();
                 return true;

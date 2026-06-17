@@ -7,6 +7,10 @@ status file for verification notes, next steps, and implementation details.
 
 ### Latest Session Summary
 
+- Added persistent shortcut settings storage in `saves/settings.txt`, loaded at
+  windowed-client startup and written immediately after shortcut rebinding.
+- Added tests for shortcut settings round-tripping and tolerant parsing of
+  missing or unknown shortcut keys.
 - Fixed inventory tooltip draw order so tooltips render above item icons, and
   restyled them with dark gray borders and more readable padding.
 - Changed double-click collection to track the clicked item, fixing the common

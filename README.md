@@ -15,7 +15,7 @@ cargo run
 Controls:
 
 - Main menu: click the center button or press `Enter` to open world management
-- Main menu Settings: change gameplay shortcuts for the current session
+- Main menu Settings: change gameplay shortcuts, saved in `saves/settings.txt`
 - Manage worlds: `Enter` loads the selected world, `N` creates a world, `R`
   renames the selected world, `Delete` deletes it, and arrow keys change
   selection
@@ -36,8 +36,7 @@ Controls:
 - `E`: open or close the inventory and crafting overlay
 - `Esc`: open the pause overlay
 - Pause overlay: `Keep Playing` resumes; `Save & Quit` writes player/chunk
-  changes and returns to the main menu; Settings changes gameplay shortcuts for
-  the current session
+  changes and returns to the main menu; Settings changes gameplay shortcuts
 - Window close button: save and quit
 
 ## Debug Commands
@@ -86,11 +85,10 @@ Implemented:
 - Per-world generation seeds
 - Saved player position and saved edited chunks
 - Player inventory, hotbar selection, crafting grids, and dropped loot pickup
-- Runtime shortcut rebinding for movement, inventory, pause, dropping, and
+- Persistent shortcut rebinding for movement, inventory, pause, dropping, and
   hotbar selection
 
 Not implemented yet:
 
 - Health, hunger, armor/offhand slots, container inventories, and game mode
   persistence
-- Persistent settings storage for changed shortcuts

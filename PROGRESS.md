@@ -4,6 +4,11 @@ Last updated: 2026-06-17
 
 ## Done
 
+- Added persistent shortcut settings storage under `saves/settings.txt`.
+- Loaded shortcut bindings from the settings file at windowed-client startup
+  and saved bindings immediately after a shortcut is rebound.
+- Added regression coverage for settings shortcut save/load round-tripping and
+  tolerant parsing of missing or unknown shortcut keys.
 - Fixed inventory tooltip layering so tooltips draw after item icons, changed
   tooltip styling to dark gray, and increased tooltip padding.
 - Changed fast double-left-click collection to track the clicked item rather
