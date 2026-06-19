@@ -4,6 +4,21 @@ Last updated: 2026-06-19
 
 ## Done
 
+- Improved chunk loading player experience and streaming throughput:
+  - increased the active resident area from 5 x 5 chunks to 11 x 11 chunks
+  - raised per-frame chunk generation and remesh budgets while keeping them
+    explicitly capped
+  - sorted missing chunks and pending remeshes by distance with a camera-forward
+    tie-break so terrain ahead of the player is prepared first
+  - skipped draw calls for far chunk buffers outside a broad camera-forward
+    cone while keeping those chunks resident
+  - tuned distance fog into a later capped haze so nearby terrain stays clear
+    and distant terrain remains readable
+  - bounded GPU chunk render buffers to the active render radius while keeping
+    loaded chunk data resident for gameplay and save safety
+- Added regression coverage for camera-forward chunk streaming priority.
+- Updated player and developer documentation for chunk streaming, render
+  distance, remesh budgets, and fog.
 - Changed oak leaves to use a 15% sapling chance and applied that chance to
   both decay and normal leaf breaking.
 - Fixed burning furnaces with plain or older block states so ticking repairs

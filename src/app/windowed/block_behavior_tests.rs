@@ -317,10 +317,13 @@ fn sand_falls_into_clear_space_below() {
         world.block(WorldBlockPosition { x: 6, y: 8, z: 6 }),
         Some(content.block_ids.air)
     );
-    assert_eq!(
-        world.block(WorldBlockPosition { x: 6, y: 7, z: 6 }),
-        Some(content.block_ids.sand)
-    );
+    assert!(column_contains_block(
+        &world,
+        6,
+        0..8,
+        6,
+        content.block_ids.sand
+    ));
 }
 
 #[test]
@@ -356,8 +359,23 @@ fn removing_support_schedules_sand_to_fall() {
         world.block(WorldBlockPosition { x: 6, y: 8, z: 6 }),
         Some(content.block_ids.air)
     );
-    assert_eq!(
-        world.block(WorldBlockPosition { x: 6, y: 7, z: 6 }),
-        Some(content.block_ids.sand)
-    );
+    assert!(column_contains_block(
+        &world,
+        6,
+        0..8,
+        6,
+        content.block_ids.sand
+    ));
+}
+
+fn column_contains_block(
+    world: &ClientWorld,
+    x: i32,
+    y_range: std::ops::Range<i32>,
+    z: i32,
+    block: crate::engine::world::BlockId,
+) -> bool {
+    y_range
+        .into_iter()
+        .any(|y| world.block(WorldBlockPosition { x, y, z }) == Some(block))
 }

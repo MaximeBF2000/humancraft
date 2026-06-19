@@ -159,17 +159,39 @@ impl ClientWorld {
         position: Vec3,
         max_new_chunks: usize,
     ) -> Vec<ChunkPosition> {
-        self.ensure_chunks_around_render_position_with_saves(position, max_new_chunks, None)
+        self.ensure_chunks_around_render_position_with_saves(
+            position,
+            Vec3::ZERO,
+            max_new_chunks,
+            None,
+        )
+    }
+
+    #[cfg(test)]
+    pub(super) fn ensure_chunks_around_render_position_facing(
+        &mut self,
+        position: Vec3,
+        forward: Vec3,
+        max_new_chunks: usize,
+    ) -> Vec<ChunkPosition> {
+        self.ensure_chunks_around_render_position_with_saves(
+            position,
+            forward,
+            max_new_chunks,
+            None,
+        )
     }
 
     pub(super) fn ensure_chunks_around_render_position_with_store(
         &mut self,
         position: Vec3,
+        forward: Vec3,
         max_new_chunks: usize,
         save_store: &WorldSaveStore,
     ) -> Vec<ChunkPosition> {
         self.ensure_chunks_around_render_position_with_saves(
             position,
+            forward,
             max_new_chunks,
             Some(save_store),
         )
@@ -178,6 +200,7 @@ impl ClientWorld {
     fn ensure_chunks_around_render_position_with_saves(
         &mut self,
         position: Vec3,
+        forward: Vec3,
         max_new_chunks: usize,
         save_store: Option<&WorldSaveStore>,
     ) -> Vec<ChunkPosition> {
@@ -196,11 +219,7 @@ impl ClientWorld {
             }
         }
 
-        missing_chunks.sort_by_key(|chunk| {
-            let dx = (chunk.x - center.x).abs();
-            let dz = (chunk.z - center.z).abs();
-            (dx.max(dz), dx + dz, chunk.z, chunk.x)
-        });
+        sort_chunks_for_streaming(&mut missing_chunks, center, forward);
 
         for chunk_position in missing_chunks.into_iter().take(max_new_chunks) {
             let chunk = save_store
@@ -234,6 +253,24 @@ impl ClientWorld {
             texture_atlas,
             RenderChunkBounds::from_chunk_positions(self.chunks.keys().copied()),
         ))
+    }
+
+    pub(super) fn loaded_chunk_positions_around_render_position(
+        &self,
+        position: Vec3,
+    ) -> Vec<ChunkPosition> {
+        let center = chunk_position_for_render_position(position);
+        let mut chunk_positions = Vec::new();
+        for z in center.z - self.render_distance_chunks..=center.z + self.render_distance_chunks {
+            for x in center.x - self.render_distance_chunks..=center.x + self.render_distance_chunks
+            {
+                let chunk_position = ChunkPosition { x, z };
+                if self.chunks.contains_key(&chunk_position) {
+                    chunk_positions.push(chunk_position);
+                }
+            }
+        }
+        chunk_positions
     }
 
     pub(super) fn mesh_chunk_for_render(
@@ -830,6 +867,38 @@ impl ClientWorld {
                 _ => {}
             }
         }
+    }
+}
+
+pub(super) fn sort_chunks_for_streaming(
+    chunks: &mut [ChunkPosition],
+    center: ChunkPosition,
+    forward: Vec3,
+) {
+    let forward = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
+    let forward_x = quantized_axis(forward.x);
+    let forward_z = quantized_axis(forward.z);
+    chunks.sort_by_key(|chunk| {
+        let dx = chunk.x - center.x;
+        let dz = chunk.z - center.z;
+        let ahead = dx * forward_x + dz * forward_z;
+        (
+            dx.abs().max(dz.abs()),
+            -ahead,
+            dx.abs() + dz.abs(),
+            chunk.z,
+            chunk.x,
+        )
+    });
+}
+
+fn quantized_axis(value: f32) -> i32 {
+    if value > 0.25 {
+        1
+    } else if value < -0.25 {
+        -1
+    } else {
+        0
     }
 }
 

@@ -66,6 +66,10 @@ generation.
 - Treat generation as the fallback source of chunk data. When a saved chunk
   exists for a world, the windowed client loads that chunk instead of
   regenerating it.
+- Support incremental client streaming. The windowed client requests a larger
+  chunk radius than it can generate in one frame, so newly missing chunks are
+  sorted by distance from the player and then biased toward the camera's
+  forward direction.
 
 ## Inputs
 
@@ -101,4 +105,5 @@ generation.
   until cross-chunk decoration exists.
 - There are no caves, water, or non-tree decorations yet.
 - The windowed client keeps generated chunks resident; there is no unload
-  policy yet.
+  policy yet. The current default resident area around the player is 11 x 11
+  chunks before any previously loaded chunks outside that area are retained.

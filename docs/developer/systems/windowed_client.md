@@ -59,8 +59,8 @@ features do not accumulate in the event-loop shell.
   drag, cursor-stack, quick-transfer, double-click collect, hotbar swap, drop,
   and save conversion helpers.
 - `src/app/windowed/constants.rs`: explicit windowed-client tuning constants
-  for movement, chunk budgets, inventory layout, block-interaction cadence, and
-  loot behavior.
+  for movement, chunk budgets, world fog, inventory layout, block-interaction
+  cadence, and loot behavior.
 - `src/app/windowed/world_lifecycle.rs`: world menu clicks, save create/rename/
   delete/load, active-world flush including placed block entities,
   save-and-quit, and window-title updates.
@@ -84,6 +84,21 @@ features do not accumulate in the event-loop shell.
 - Keep keyboard shortcut behavior routed through `KeyBindings` instead of
   adding new hardcoded logical-key checks. Persist shortcut changes through
   `SettingsStore`, not world metadata.
+- Keep chunk-streaming values explicit in `constants.rs`. The current
+  windowed client keeps an 11 x 11 chunk area resident, generates at most three
+  new chunks per frame, rebuilds at most four chunk meshes per frame, and sorts
+  pending chunk work by distance with a camera-forward bias.
+- Keep coarse chunk draw culling renderer-local. The current renderer always
+  draws nearby chunks, then skips farther chunk buffers outside a broad
+  horizontal forward cone while leaving those chunks loaded and meshed.
+- Keep the GPU chunk-buffer working set bounded to the active render radius.
+  Chunks remain resident in `ClientWorld` for gameplay and save safety, but
+  terrain buffers outside the active radius are released and rebuilt through
+  the normal remesh budget when the player returns.
+- Terrain fog is a renderer-side loading mask. The world shader blends distant
+  terrain into the shared sky color from `WORLD_FOG_START_BLOCKS` to
+  `WORLD_FOG_END_BLOCKS`, capped by `WORLD_FOG_MAX_AMOUNT`; keep those values
+  aligned with render distance changes.
 - Keep files under 250 lines by default. If a file is already over that limit,
   extract a cohesive responsibility before adding more behavior to it.
 - Prefer moving cohesive private helpers into a module before adding more

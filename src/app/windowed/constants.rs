@@ -1,7 +1,13 @@
-pub(super) const CLIENT_RENDER_DISTANCE_CHUNKS: i32 = 2;
-pub(super) const MAX_CHUNK_LOADS_PER_FRAME: usize = 2;
-pub(super) const MAX_CHUNK_REMESHES_PER_FRAME: usize = 3;
+pub(super) const CLIENT_RENDER_DISTANCE_CHUNKS: i32 = 5;
+pub(super) const MAX_CHUNK_LOADS_PER_FRAME: usize = 3;
+pub(super) const MAX_CHUNK_REMESHES_PER_FRAME: usize = 4;
 pub(super) const CHUNK_WORLD_SIZE: f32 = 16.0;
+pub(super) const WORLD_FOG_START_BLOCKS: f32 = 84.0;
+pub(super) const WORLD_FOG_END_BLOCKS: f32 = 156.0;
+pub(super) const WORLD_FOG_MAX_AMOUNT: f32 = 0.45;
+pub(super) const CHUNK_RENDER_ALWAYS_DRAW_BLOCKS: f32 = 40.0;
+pub(super) const CHUNK_RENDER_CULL_HALF_ANGLE_DEGREES: f32 = 82.0;
+pub(super) const SKY_COLOR: [f32; 3] = [0.53, 0.75, 0.95];
 pub(super) const PLAYER_HEIGHT: f32 = 1.8;
 pub(super) const PLAYER_STANDING_EYE_HEIGHT: f32 = 1.62;
 pub(super) const PLAYER_SNEAKING_EYE_HEIGHT: f32 = 1.54;

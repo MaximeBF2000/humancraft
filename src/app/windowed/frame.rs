@@ -20,6 +20,7 @@ impl RenderState {
                 }
                 dirty_chunks.extend(world.ensure_chunks_around_render_position_with_store(
                     self.camera.position,
+                    self.camera.forward(),
                     MAX_CHUNK_LOADS_PER_FRAME,
                     &self.save_store,
                 ));
@@ -44,6 +45,7 @@ impl RenderState {
             self.mark_dirty_chunks_for_save(&dirty_chunks);
             self.queue_chunk_remeshes(&dirty_chunks);
         }
+        self.update_active_chunk_render_buffers();
         let remesh_chunks = self.take_pending_chunk_remeshes(MAX_CHUNK_REMESHES_PER_FRAME);
         if !remesh_chunks.is_empty() {
             self.rebuild_chunk_meshes(&remesh_chunks);
@@ -52,6 +54,7 @@ impl RenderState {
         let uniform = CameraUniform::new(
             self.camera
                 .view_projection(self.config.width, self.config.height),
+            self.camera.position,
         );
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
@@ -318,9 +321,9 @@ impl RenderState {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.53,
-                            g: 0.75,
-                            b: 0.95,
+                            r: SKY_COLOR[0] as f64,
+                            g: SKY_COLOR[1] as f64,
+                            b: SKY_COLOR[2] as f64,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -342,8 +345,11 @@ impl RenderState {
                 pass.set_pipeline(&self.render_pipeline);
                 pass.set_bind_group(0, &self.camera_bind_group, &[]);
                 pass.set_bind_group(1, &self.texture_bind_group, &[]);
-                for chunk_buffer in self.chunk_buffers.values() {
+                for (chunk_position, chunk_buffer) in &self.chunk_buffers {
                     if chunk_buffer.index_count == 0 {
+                        continue;
+                    }
+                    if !self.should_draw_chunk(*chunk_position) {
                         continue;
                     }
                     pass.set_vertex_buffer(0, chunk_buffer.vertex_buffer.slice(..));
@@ -446,12 +452,11 @@ impl RenderState {
 
     pub(super) fn take_pending_chunk_remeshes(&mut self, limit: usize) -> Vec<ChunkPosition> {
         let mut chunks: Vec<_> = self.pending_chunk_remeshes.iter().copied().collect();
-        chunks.sort_by_key(|chunk| {
-            let camera_chunk = chunk_position_for_render_position(self.camera.position);
-            let dx = (chunk.x - camera_chunk.x).abs();
-            let dz = (chunk.z - camera_chunk.z).abs();
-            (dx.max(dz), dx + dz, chunk.z, chunk.x)
-        });
+        sort_chunks_for_streaming(
+            &mut chunks,
+            chunk_position_for_render_position(self.camera.position),
+            self.camera.forward(),
+        );
         chunks.truncate(limit);
 
         for chunk in &chunks {
@@ -459,6 +464,25 @@ impl RenderState {
         }
 
         chunks
+    }
+
+    pub(super) fn update_active_chunk_render_buffers(&mut self) {
+        let Some(world) = &self.world else {
+            return;
+        };
+        let active_chunks: HashSet<_> = world
+            .loaded_chunk_positions_around_render_position(self.camera.position)
+            .into_iter()
+            .collect();
+        self.chunk_buffers
+            .retain(|chunk_position, _| active_chunks.contains(chunk_position));
+        self.pending_chunk_remeshes
+            .retain(|chunk_position| active_chunks.contains(chunk_position));
+        for chunk_position in active_chunks {
+            if !self.chunk_buffers.contains_key(&chunk_position) {
+                self.pending_chunk_remeshes.insert(chunk_position);
+            }
+        }
     }
 
     pub(super) fn update_target_outline(&mut self) {
@@ -516,5 +540,23 @@ impl RenderState {
             0,
             bytemuck::cast_slice(&vertices),
         );
+    }
+
+    fn should_draw_chunk(&self, chunk_position: ChunkPosition) -> bool {
+        let chunk_center = Vec3::new(
+            chunk_position.x as f32 * CHUNK_WORLD_SIZE,
+            self.camera.position.y,
+            chunk_position.z as f32 * CHUNK_WORLD_SIZE,
+        );
+        let to_chunk = chunk_center - self.camera.position;
+        let distance_squared = to_chunk.length_squared();
+        if distance_squared <= CHUNK_RENDER_ALWAYS_DRAW_BLOCKS * CHUNK_RENDER_ALWAYS_DRAW_BLOCKS {
+            return true;
+        }
+
+        let flat_forward =
+            Vec3::new(self.camera.forward().x, 0.0, self.camera.forward().z).normalize_or_zero();
+        let flat_to_chunk = Vec3::new(to_chunk.x, 0.0, to_chunk.z).normalize_or_zero();
+        flat_forward.dot(flat_to_chunk) >= CHUNK_RENDER_CULL_HALF_ANGLE_DEGREES.to_radians().cos()
     }
 }

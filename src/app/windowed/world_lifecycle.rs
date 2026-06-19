@@ -250,6 +250,7 @@ impl RenderState {
         );
         let generated_chunks = world.ensure_chunks_around_render_position_with_store(
             saved_eye,
+            Vec3::ZERO,
             usize::MAX,
             &self.save_store,
         );

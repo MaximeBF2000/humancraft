@@ -37,8 +37,19 @@ The chunk mesher converts chunk block IDs into renderer-neutral visible faces.
   edits.
 - Runtime chunk streaming uses a small per-frame remesh/upload budget for dirty
   chunks. Missing chunks can be generated ahead of their GPU buffers; the
-  renderer queues dirty chunk positions and rebuilds the closest pending chunk
-  meshes first.
+  renderer queues dirty chunk positions and rebuilds nearby chunks first, with
+  chunks in the camera's forward direction winning ties over equally distant
+  chunks behind the player.
+- The windowed renderer uses distance fog to fade far terrain into the sky
+  color before the active render-distance boundary. Fog is renderer-only and
+  does not affect chunk storage, meshing, collision, or gameplay systems.
+- Loaded and meshed chunks are not always drawn. The windowed renderer applies
+  a coarse horizontal chunk cull that always keeps nearby chunks visible, then
+  skips farther chunks outside a broad camera-forward cone.
+- Chunk data and chunk render buffers have different lifetimes. `ClientWorld`
+  keeps loaded chunks resident, while the renderer keeps GPU chunk buffers only
+  for the active render-radius working set and rebuilds missing buffers through
+  the throttled remesh queue.
 - State-derived block AABBs are stack-backed fixed-size values instead of
   heap-allocated vectors. Keep this allocation-free path intact because chunk
   meshing and collision call it for many blocks per frame or remesh.

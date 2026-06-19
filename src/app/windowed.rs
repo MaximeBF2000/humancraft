@@ -51,7 +51,7 @@ mod world_render;
 
 use block_break_overlay::build_block_break_overlay_mesh;
 use camera::Camera;
-use client_world::{BlockEntity, ClientWorld};
+use client_world::{BlockEntity, ClientWorld, sort_chunks_for_streaming};
 use constants::*;
 use hud::{build_crosshair_mesh, build_outline_vertices};
 use input::InputState;
@@ -316,8 +316,10 @@ impl RenderState {
         let texture_atlas = TextureAtlas::load(&device, &queue, &content.blocks, &content.items);
 
         let camera = Camera::new(Vec3::new(0.0, PLAYER_STANDING_EYE_HEIGHT + 12.0, 0.0));
-        let camera_uniform =
-            CameraUniform::new(camera.view_projection(config.width, config.height));
+        let camera_uniform = CameraUniform::new(
+            camera.view_projection(config.width, config.height),
+            camera.position,
+        );
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
             contents: bytemuck::bytes_of(&camera_uniform),
@@ -328,7 +330,7 @@ impl RenderState {
                 label: Some("Camera Bind Group Layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,

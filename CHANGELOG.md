@@ -7,6 +7,12 @@ status file for verification notes, next steps, and implementation details.
 
 ### Latest Session Summary
 
+- Improved chunk loading performance and player experience by increasing the
+  active resident area from 5 x 5 chunks to 11 x 11 chunks, raising the capped
+  per-frame load/remesh budgets, prioritizing missing chunks and dirty meshes
+  near and ahead of the camera, skipping far chunk draw calls outside a broad
+  camera-forward cone, fading distant terrain into a later capped sky haze, and
+  bounding GPU chunk render buffers to the active render-radius working set.
 - Fixed oak leaf sapling drops so decay and normal breaking both use the
   configured chance, now tuned to 15%.
 - Fixed furnace lit-front rendering for furnaces that had plain/legacy block

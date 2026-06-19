@@ -53,6 +53,15 @@ larger lower-right 3D block in hand, while other selected items render as
 angled item sprites. Pressing `E` opens the full 36-slot inventory overlay and
 releases the cursor; pressing `E` or `Esc` closes it and recaptures mouse-look.
 
+## World Visibility
+
+The windowed client streams terrain chunks around the player and keeps a larger
+11 x 11 chunk area resident during play. Nearby chunks load first, and when new
+chunks are needed while moving, chunks in front of the camera are prioritized
+before equally distant chunks behind the player. Distant terrain fades into sky
+fog near the edge of the render distance so the loading boundary is less
+visible during exploration, while nearby terrain remains clear.
+
 The inventory overlay includes a 2 x 2 crafting grid. Put one oak log in any
 crafting slot to produce four oak planks. Put oak planks in all four 2 x 2
 crafting slots to craft a crafting table. Put two oak planks vertically to

@@ -323,21 +323,21 @@ fn client_world_generates_chunks_around_player_position() {
 
     let initial_dirty =
         world.ensure_chunks_around_render_position(Vec3::new(0.0, 0.0, 0.0), usize::MAX);
-    assert_eq!(world.chunks.len(), 25);
-    assert_eq!(initial_dirty.len(), 25);
+    assert_eq!(world.chunks.len(), 121);
+    assert_eq!(initial_dirty.len(), 121);
     assert!(initial_dirty.contains(&ChunkPosition { x: 0, z: 0 }));
     assert!(
         world
             .ensure_chunks_around_render_position(Vec3::new(0.0, 0.0, 0.0), usize::MAX)
             .is_empty()
     );
-    assert_eq!(world.chunks.len(), 25);
+    assert_eq!(world.chunks.len(), 121);
 
     let distant_dirty =
         world.ensure_chunks_around_render_position(Vec3::new(80.0, 0.0, -72.0), usize::MAX);
     assert!(!distant_dirty.is_empty());
     assert!(world.chunks.contains_key(&ChunkPosition { x: 5, z: -4 }));
-    assert!(world.chunks.len() > 25);
+    assert!(world.chunks.len() > 121);
 }
 
 #[test]
@@ -350,7 +350,19 @@ fn client_world_respects_chunk_load_budget() {
     assert_eq!(world.chunks.len(), 3);
     assert!(!dirty.is_empty());
     assert!(world.chunks.contains_key(&ChunkPosition { x: 0, z: 0 }));
-    assert!(!world.chunks.contains_key(&ChunkPosition { x: -2, z: -2 }));
+    assert!(!world.chunks.contains_key(&ChunkPosition { x: -5, z: -5 }));
+}
+
+#[test]
+fn client_world_prioritizes_chunks_in_front_of_the_player() {
+    let content = bootstrap_content().unwrap();
+    let mut world = test_client_world(&content);
+
+    world.ensure_chunks_around_render_position_facing(Vec3::ZERO, Vec3::X, 2);
+
+    assert!(world.chunks.contains_key(&ChunkPosition { x: 0, z: 0 }));
+    assert!(world.chunks.contains_key(&ChunkPosition { x: 1, z: 0 }));
+    assert!(!world.chunks.contains_key(&ChunkPosition { x: -1, z: 0 }));
 }
 
 #[test]
@@ -415,7 +427,12 @@ fn saved_chunks_override_generation_when_streaming() {
         CLIENT_RENDER_DISTANCE_CHUNKS,
         metadata.id.clone(),
     );
-    world.ensure_chunks_around_render_position_with_store(Vec3::ZERO, usize::MAX, &store);
+    world.ensure_chunks_around_render_position_with_store(
+        Vec3::ZERO,
+        Vec3::ZERO,
+        usize::MAX,
+        &store,
+    );
 
     assert_eq!(
         world.block(WorldBlockPosition { x: 8, y: 64, z: 8 }),
