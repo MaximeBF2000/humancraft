@@ -11,13 +11,20 @@ item IDs and stack counts, not concrete content types.
 - Tools are item definitions with optional `ToolDefinition` metadata. The
   metadata records tool kind, material, harvest level, and vanilla-style speed
   multiplier.
-- `ItemStack` stores an `ItemId` plus a count.
+- `ItemStack` stores an `ItemId`, count, and optional stack metadata. Metadata
+  is used for non-stackable stateful items such as broken chests carrying their
+  runtime inventory.
 - `Inventory` owns fixed slots and merges compatible stacks before using empty
   slots.
 - `CraftingRecipeDefinition` lives in `src/engine/world/crafting.rs`.
   Recipes are registered in a `CraftingRecipeRegistry` and can be shapeless or
   shaped. Shapeless recipes match ingredients anywhere in the grid; shaped
   recipes match an exact pattern inside the available grid.
+- `SmeltingRecipeDefinition` lives in `src/engine/world/smelting.rs`.
+  Smelting recipes map one input item key to one output stack and a cook
+  duration.
+- Item definitions can declare `fuel_ticks`; furnaces consume that metadata
+  instead of matching hard-coded item keys.
 - Player inventory is currently 36 slots, with the first 9 slots rendered as
   the always-visible hotbar.
 - `RenderState` owns transient UI state for a carried cursor stack, current
@@ -46,6 +53,9 @@ Keep this path data-driven:
 - If a dropped block resource should be placeable, register it as a block item
   with a `place_block` target. Stone uses this path by dropping placeable
   cobblestone.
+- Plant-like placeables use the same item path. Oak saplings are item
+  definitions with `place_block = humancraft:oak_sapling`, while the block
+  definition owns the cross shape and growth behavior.
 - Keep harvest requirements on block definitions. Do not branch on concrete
   block keys from the windowed controller.
 
@@ -74,8 +84,8 @@ Current block tool data:
 - pickaxe-required level 2: iron ore
 - pickaxe-required level 3: gold ore, diamond ore
 
-Iron ore currently drops `humancraft:iron_ingot` directly so iron tool recipes
-are reachable before furnace smelting exists.
+Iron ore now drops `humancraft:raw_iron`, which smelts into
+`humancraft:iron_ingot`.
 
 ## Crafting
 
@@ -94,6 +104,23 @@ Current starter crafting content:
 - shaped wooden, stone, iron, and diamond tool recipes use the original
   Minecraft 3 x 3 pickaxe, shovel, and axe shapes. Axes include both left and
   right orientations.
+- shaped `humancraft:chest_from_oak_planks`: eight oak planks around an empty
+  center produce one chest.
+- shaped `humancraft:furnace_from_cobblestone`: eight cobblestone around an
+  empty center produce one furnace.
+- shaped wooden stair recipes use six oak planks in either stair orientation
+  and produce four wooden stairs.
+- shaped `humancraft:wooden_slab_from_oak_planks`: three horizontal oak planks
+  produce six wooden slabs.
+
+Current starter smelting content:
+
+- `humancraft:sand` smelts into `humancraft:glass`.
+- `humancraft:raw_iron` smelts into `humancraft:iron_ingot`.
+- Coal, oak planks, sticks, oak logs, wooden stairs, and wooden slabs are
+  registered as fuels through item metadata.
+- Furnace recipes use the vanilla 200 game tick cook duration, which is 10
+  seconds at the current 20 Hz gameplay tick rate.
 
 The windowed client owns only transient crafting inputs. Closing inventory,
 pausing, saving, or switching back to menus attempts to return crafting-grid
@@ -130,10 +157,14 @@ Current behavior:
   - right click splits a slot stack or places one carried item
   - shift-left click transfers player stacks between hotbar and main inventory
     or shift-crafts as many results as fit
+  - with a chest open, player shift-left click moves stacks into the chest and
+    container shift-left click moves stacks back into the player inventory
+  - with a furnace open, player shift-left click routes fuels to the fuel slot
+    and smeltable items to the input slot; furnace output remains take-only
   - left drag distributes a carried stack over compatible player or crafting
     slots
-  - right drag places one carried item in each compatible player or crafting
-    slot
+  - left or right drag also works across compatible chest/furnace slots; furnace
+    output rejects manual placement
   - double-left click while carrying a stack collects matching visible stacks
     up to the item stack limit
   - number keys `1` through `9` swap a hovered player or crafting slot with the
@@ -144,16 +175,28 @@ Current behavior:
     reapplies the distribution on every newly entered slot so the UI updates
     optimistically while dragging
 - Left and right arrows move the selected hotbar slot.
-- The current UI has no separate armor, offhand, creative, chest, or furnace
-  inventories yet. `InventorySlotId` keeps the player/crafting behavior typed
-  so future slot regions can be added without binding rules to screen
-  coordinates.
+- The current UI has no separate armor, offhand, or creative layout yet.
+  Runtime chest and furnace block entities use a shared container layout:
+  chests expose 27 slots, furnaces expose vanilla-positioned input, fuel, and
+  output slots, and furnace output rejects manual placement. `InventorySlotId`
+  keeps the player, crafting, and container behavior typed so future slot
+  regions can be added without binding rules to screen coordinates.
 - Right-click block placement only works when the selected hotbar item has a
   `place_block` target. Successful placement consumes one item.
+- Placing oak saplings writes a stage-0 sapling block state. Sapling growth is
+  handled by the block behavior tick system, not by inventory or placement
+  code.
 - Right clicking a block tagged `crafting_table` opens the 3 x 3 crafting table
   UI instead of placing a block against it.
+- Breaking a chest removes its block entity without spilling its slots and
+  drops a non-stackable chest item carrying that inventory as runtime stack
+  metadata. Placing that chest item restores the carried inventory into the new
+  chest block entity.
 - `Save & Quit` and window close persist player inventory in world metadata as
-  item keys and counts.
+  item keys and counts. Placed chest and furnace block entities are persisted in
+  `block_entities.txt` with item keys/counts and furnace timers. Stack metadata
+  is runtime-only for now, so carried chest inventories still need durable save
+  support before they survive saving inside player inventory or dropped loot.
 
 ## Rendering
 
@@ -204,6 +247,8 @@ Keep regression coverage focused on player-facing behavior and data integrity:
   falling normally
 - pickup adding loot to inventory
 - inventory save conversion and metadata round-tripping
+- broken chest items preserving their runtime inventory when picked up and
+  placed again
 - square inventory slot geometry
 - loot render geometry staying above its contact point and rotating around Y
 - every registered item referencing a loadable texture

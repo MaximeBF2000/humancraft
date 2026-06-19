@@ -17,7 +17,8 @@
 //!   to quads later.
 
 use crate::engine::world::{
-    BlockId, BlockPosition, BlockRegistry, CHUNK_HEIGHT, CHUNK_SIZE, Chunk,
+    BlockAabb, BlockId, BlockPosition, BlockRegistry, BlockShape, BlockState, CHUNK_HEIGHT,
+    CHUNK_SIZE, Chunk, block_state_aabbs,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -33,6 +34,7 @@ pub enum FaceDirection {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MeshQuad {
     pub block: BlockId,
+    pub state: BlockState,
     pub direction: FaceDirection,
     pub vertices: [[f32; 3]; 4],
 }
@@ -72,33 +74,51 @@ impl ChunkMesher {
             for z in 0..CHUNK_SIZE {
                 for x in 0..CHUNK_SIZE {
                     let position = BlockPosition { x, y, z };
-                    let Some(block) = chunk.block(position) else {
+                    let Some(state) = chunk.block_state(position) else {
                         continue;
                     };
-                    if !is_visible_block(block, blocks) {
+                    if !is_visible_block(state.block, blocks) {
+                        continue;
+                    }
+                    let Some(definition) = blocks.get(state.block) else {
+                        continue;
+                    };
+
+                    if definition.shape == BlockShape::Cross {
+                        for vertices in cross_vertices(position) {
+                            mesh.quads.push(MeshQuad {
+                                block: state.block,
+                                state,
+                                direction: FaceDirection::North,
+                                vertices,
+                            });
+                        }
                         continue;
                     }
 
-                    for direction in [
-                        FaceDirection::North,
-                        FaceDirection::South,
-                        FaceDirection::East,
-                        FaceDirection::West,
-                        FaceDirection::Up,
-                        FaceDirection::Down,
-                    ] {
-                        if self.face_is_exposed(
-                            chunk,
-                            blocks,
-                            position,
-                            direction,
-                            &mut outside_neighbor,
-                        ) {
-                            mesh.quads.push(MeshQuad {
-                                block,
+                    for aabb in block_state_aabbs(definition, state).iter() {
+                        for direction in [
+                            FaceDirection::North,
+                            FaceDirection::South,
+                            FaceDirection::East,
+                            FaceDirection::West,
+                            FaceDirection::Up,
+                            FaceDirection::Down,
+                        ] {
+                            if self.face_is_exposed(
+                                chunk,
+                                blocks,
+                                position,
                                 direction,
-                                vertices: face_vertices(position, direction),
-                            });
+                                &mut outside_neighbor,
+                            ) {
+                                mesh.quads.push(MeshQuad {
+                                    block: state.block,
+                                    state,
+                                    direction,
+                                    vertices: aabb_face_vertices(position, aabb, direction),
+                                });
+                            }
                         }
                     }
                 }
@@ -133,14 +153,18 @@ impl ChunkMesher {
 fn is_visible_block(block: BlockId, blocks: &BlockRegistry) -> bool {
     blocks
         .get(block)
-        .map(|definition| definition.solid || !definition.transparent)
+        .map(|definition| {
+            definition.shape == BlockShape::Cross || definition.solid || !definition.transparent
+        })
         .unwrap_or(false)
 }
 
 fn is_occluding_block(block: BlockId, blocks: &BlockRegistry) -> bool {
     blocks
         .get(block)
-        .map(|definition| definition.solid && !definition.transparent)
+        .map(|definition| {
+            definition.solid && !definition.transparent && definition.shape == BlockShape::FullCube
+        })
         .unwrap_or(false)
 }
 
@@ -174,21 +198,68 @@ fn neighbor_position(position: BlockPosition, direction: FaceDirection) -> Optio
 }
 
 fn face_vertices(position: BlockPosition, direction: FaceDirection) -> [[f32; 3]; 4] {
+    aabb_face_vertices(
+        position,
+        BlockAabb::new([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]),
+        direction,
+    )
+}
+
+fn aabb_face_vertices(
+    position: BlockPosition,
+    aabb: BlockAabb,
+    direction: FaceDirection,
+) -> [[f32; 3]; 4] {
     let x = position.x as f32;
     let y = position.y as f32;
     let z = position.z as f32;
-    let x1 = x + 1.0;
-    let y1 = y + 1.0;
-    let z1 = z + 1.0;
+    let x0 = x + aabb.min[0];
+    let y0 = y + aabb.min[1];
+    let z0 = z + aabb.min[2];
+    let x1 = x + aabb.max[0];
+    let y1 = y + aabb.max[1];
+    let z1 = z + aabb.max[2];
 
     match direction {
-        FaceDirection::North => [[x1, y, z], [x, y, z], [x, y1, z], [x1, y1, z]],
-        FaceDirection::South => [[x, y, z1], [x1, y, z1], [x1, y1, z1], [x, y1, z1]],
-        FaceDirection::East => [[x1, y, z1], [x1, y, z], [x1, y1, z], [x1, y1, z1]],
-        FaceDirection::West => [[x, y, z], [x, y, z1], [x, y1, z1], [x, y1, z]],
-        FaceDirection::Up => [[x, y1, z1], [x1, y1, z1], [x1, y1, z], [x, y1, z]],
-        FaceDirection::Down => [[x, y, z], [x1, y, z], [x1, y, z1], [x, y, z1]],
+        FaceDirection::North => [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]],
+        FaceDirection::South => [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]],
+        FaceDirection::East => [[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]],
+        FaceDirection::West => [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]],
+        FaceDirection::Up => [[x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0]],
+        FaceDirection::Down => [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]],
     }
+}
+
+fn cross_vertices(position: BlockPosition) -> [[[f32; 3]; 4]; 4] {
+    let x = position.x as f32;
+    let y = position.y as f32;
+    let z = position.z as f32;
+    [
+        [
+            [x, y, z],
+            [x + 1.0, y, z + 1.0],
+            [x + 1.0, y + 1.0, z + 1.0],
+            [x, y + 1.0, z],
+        ],
+        [
+            [x + 1.0, y, z + 1.0],
+            [x, y, z],
+            [x, y + 1.0, z],
+            [x + 1.0, y + 1.0, z + 1.0],
+        ],
+        [
+            [x + 1.0, y, z],
+            [x, y, z + 1.0],
+            [x, y + 1.0, z + 1.0],
+            [x + 1.0, y + 1.0, z],
+        ],
+        [
+            [x, y, z + 1.0],
+            [x + 1.0, y, z],
+            [x + 1.0, y + 1.0, z],
+            [x, y + 1.0, z + 1.0],
+        ],
+    ]
 }
 
 #[cfg(test)]

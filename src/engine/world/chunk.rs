@@ -7,7 +7,7 @@
 //! Known limitations:
 //! Light values and metadata are planned but not stored yet.
 
-use crate::engine::world::BlockId;
+use crate::engine::world::{BlockId, BlockState};
 
 pub const CHUNK_SIZE: usize = 16;
 pub const CHUNK_HEIGHT: usize = 256;
@@ -35,18 +35,25 @@ pub enum ChunkError {
 #[derive(Debug, Clone)]
 pub struct Chunk {
     position: ChunkPosition,
-    blocks: Vec<BlockId>,
+    blocks: Vec<BlockState>,
 }
 
 impl Chunk {
     pub fn filled(position: ChunkPosition, block: BlockId) -> Self {
         Self {
             position,
-            blocks: vec![block; CHUNK_VOLUME],
+            blocks: vec![BlockState::new(block); CHUNK_VOLUME],
         }
     }
 
     pub fn from_blocks(position: ChunkPosition, blocks: Vec<BlockId>) -> Result<Self, ChunkError> {
+        Self::from_states(position, blocks.into_iter().map(BlockState::new).collect())
+    }
+
+    pub fn from_states(
+        position: ChunkPosition,
+        blocks: Vec<BlockState>,
+    ) -> Result<Self, ChunkError> {
         if blocks.len() != CHUNK_VOLUME {
             return Err(ChunkError::InvalidBlockCount {
                 expected: CHUNK_VOLUME,
@@ -62,16 +69,32 @@ impl Chunk {
     }
 
     pub fn block(&self, position: BlockPosition) -> Option<BlockId> {
+        self.block_state(position).map(|state| state.block)
+    }
+
+    pub fn block_state(&self, position: BlockPosition) -> Option<BlockState> {
         Self::index(position).map(|index| self.blocks[index])
     }
 
     pub fn set_block(&mut self, position: BlockPosition, block: BlockId) -> Result<(), ChunkError> {
+        self.set_block_state(position, BlockState::new(block))
+    }
+
+    pub fn set_block_state(
+        &mut self,
+        position: BlockPosition,
+        block: BlockState,
+    ) -> Result<(), ChunkError> {
         let index = Self::index(position).ok_or(ChunkError::OutOfBounds(position))?;
         self.blocks[index] = block;
         Ok(())
     }
 
-    pub fn blocks(&self) -> &[BlockId] {
+    pub fn blocks(&self) -> Vec<BlockId> {
+        self.blocks.iter().map(|state| state.block).collect()
+    }
+
+    pub fn block_states(&self) -> &[BlockState] {
         &self.blocks
     }
 

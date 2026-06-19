@@ -41,6 +41,7 @@ pub fn register_items(items: &mut ItemRegistry, _blocks: BlockIds) -> Result<(),
     items.register(
         ItemDefinition::new("humancraft:coal", "Coal")
             .texture(item_texture_key("humancraft:coal"))
+            .fuel_ticks(1600)
             .tags(["fuel"]),
     )?;
     items.register(
@@ -66,6 +67,7 @@ pub fn register_items(items: &mut ItemRegistry, _blocks: BlockIds) -> Result<(),
     items.register(
         ItemDefinition::new("humancraft:stick", "Stick")
             .texture(item_texture_key("humancraft:stick"))
+            .fuel_ticks(100)
             .tags(["crafting_material"]),
     )?;
     register_tool_family(items, ToolMaterial::Wood, "wood", "Wooden")?;
@@ -93,6 +95,7 @@ pub fn register_items(items: &mut ItemRegistry, _blocks: BlockIds) -> Result<(),
     )?;
     items.register(
         ItemDefinition::new("humancraft:oak_sapling", "Oak Sapling")
+            .place_block("humancraft:oak_sapling")
             .texture(item_texture_key("humancraft:oak_sapling"))
             .tags(["sapling"]),
     )?;
@@ -104,6 +107,28 @@ pub fn register_items(items: &mut ItemRegistry, _blocks: BlockIds) -> Result<(),
         "humancraft:sandstone",
     )?;
     register_block_item(items, "humancraft:bedrock", "Bedrock", "humancraft:bedrock")?;
+    register_block_item(items, "humancraft:glass", "Glass", "humancraft:glass")?;
+    items
+        .register(
+            ItemDefinition::new("humancraft:chest", "Chest")
+                .max_stack_size(1)
+                .place_block("humancraft:chest")
+                .texture(item_texture_key("humancraft:chest")),
+        )
+        .map(|_| ())?;
+    register_block_item(items, "humancraft:furnace", "Furnace", "humancraft:furnace")?;
+    register_block_item(
+        items,
+        "humancraft:wooden_stairs",
+        "Wooden Stairs",
+        "humancraft:wooden_stairs",
+    )?;
+    register_block_item(
+        items,
+        "humancraft:wooden_slab",
+        "Wooden Slab",
+        "humancraft:wooden_slab",
+    )?;
 
     Ok(())
 }
@@ -114,13 +139,23 @@ fn register_block_item(
     display_name: &str,
     block_key: &str,
 ) -> Result<(), RegistryError> {
-    items
-        .register(
-            ItemDefinition::new(key, display_name)
-                .place_block(block_key)
-                .texture(item_texture_key(key)),
-        )
-        .map(|_| ())
+    let mut definition = ItemDefinition::new(key, display_name)
+        .place_block(block_key)
+        .texture(item_texture_key(key));
+    if let Some(ticks) = block_item_fuel_ticks(key) {
+        definition = definition.fuel_ticks(ticks);
+    }
+    items.register(definition).map(|_| ())
+}
+
+fn block_item_fuel_ticks(key: &str) -> Option<u32> {
+    match key {
+        "humancraft:oak_log" => Some(300),
+        "humancraft:oak_planks" => Some(300),
+        "humancraft:wooden_stairs" => Some(300),
+        "humancraft:wooden_slab" => Some(150),
+        _ => None,
+    }
 }
 
 fn register_tool_family(

@@ -10,19 +10,24 @@ features do not accumulate in the event-loop shell.
   `RenderState` storage, and application-handler wiring.
 - `src/app/windowed/app_input.rs`: keyboard, mouse, pause, inventory/crafting
   cursor, and held block interaction handling for `RenderState`.
+- `src/app/windowed/block_behaviors.rs`: loaded-chunk block behavior ticking
+  driven by block definition metadata. It currently handles gravity, generated
+  leaf decay and sapling drops, grass spreading, and sapling growth.
 - `src/app/windowed/block_break_overlay.rs`: textured block damage overlay
   mesh generation using the default `destroy_stage_0` through
   `destroy_stage_9` textures for the current break target.
 - `src/app/windowed/camera.rs`: player camera orientation, fixed-tick movement,
   collision-driven movement, sprinting, sneaking, and save conversion.
 - `src/app/windowed/client_world.rs`: loaded client chunks, save-backed chunk
-  streaming, raycasts, hardness-based block break progress, block edits, and
-  chunk mesh preparation.
+  streaming, raycasts, placement context construction, hardness-based block
+  break progress, block edits, block entities, furnace ticking, and chunk mesh
+  preparation. It also converts runtime chest/furnace block entities to and
+  from the generic save representation.
 - `src/app/windowed/input.rs`: in-game movement input state driven by the
   active shortcut bindings.
 - `src/app/windowed/frame.rs`: per-frame gameplay update, block interaction
-  continuation, chunk remesh queue processing, render pass construction, and
-  target overlay updates.
+  continuation, fixed-rate block entity ticking, chunk remesh queue
+  processing, render pass construction, and target overlay updates.
 - `src/app/windowed/hud.rs`: crosshair and selected-block outline geometry.
 - `src/app/windowed/inventory_ui.rs`: hotbar, inventory/crafting overlays,
   item icon, held item/block, player arm, and dropped-loot billboard mesh
@@ -57,12 +62,15 @@ features do not accumulate in the event-loop shell.
   for movement, chunk budgets, inventory layout, block-interaction cadence, and
   loot behavior.
 - `src/app/windowed/world_lifecycle.rs`: world menu clicks, save create/rename/
-  delete/load, active-world flush, save-and-quit, and window-title updates.
+  delete/load, active-world flush including placed block entities,
+  save-and-quit, and window-title updates.
 - `src/app/windowed/world_render.rs`: per-chunk GPU buffers, loaded-chunk
   deduplication, renderer mesh conversion, and temporary preview boundary
   filtering.
 - `src/app/windowed/tests.rs`: windowed-client regression tests kept outside
   the app shell.
+- `src/app/windowed/block_behavior_tests.rs`: focused regression tests for the
+  reusable block behavior system.
 
 ## Rules
 
@@ -87,8 +95,12 @@ features do not accumulate in the event-loop shell.
   pipeline setup remains in one constructor. Extract renderer pipeline setup
   before adding more rendering features.
 - `src/app/windowed/tests.rs` should be split by domain as more regression
-  tests are added.
+  tests are added. New block behavior coverage now lives in
+  `block_behavior_tests.rs`.
 - `src/app/windowed/inventory_ui.rs`, `client_world.rs`, `app_input.rs`,
   `frame.rs`, `world_lifecycle.rs`, `texture.rs`, and `ui_builder.rs` remain
-  above the default 250-line target. Treat them as extraction candidates before
-  adding new behavior in those areas.
+  above the default 250-line target. `client_world.rs` no longer owns the new
+  custom block behavior loop, but still needs further extraction around block
+  entity persistence and placement/breaking helpers. `app_input.rs` and
+  `inventory_ui.rs` remain priority refactor candidates before more input or UI
+  features are added.

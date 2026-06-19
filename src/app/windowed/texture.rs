@@ -4,7 +4,9 @@ use std::path::PathBuf;
 use image::GenericImageView;
 
 use crate::engine::mesh::chunk_mesher::FaceDirection;
-use crate::engine::world::{BlockId, BlockRegistry, ItemRegistry};
+use crate::engine::world::{
+    Axis, BlockId, BlockProperties, BlockRegistry, BlockState, HorizontalDirection, ItemRegistry,
+};
 
 pub(super) struct TextureAtlas {
     _texture: wgpu::Texture,
@@ -26,6 +28,11 @@ impl TextureAtlas {
         let mut texture_keys = vec!["humancraft:missing".to_string()];
         for (_, definition) in blocks.iter() {
             for key in block_texture_keys(definition) {
+                if key != "humancraft:missing" && !texture_keys.contains(&key.to_string()) {
+                    texture_keys.push(key.to_string());
+                }
+            }
+            for key in extra_block_texture_keys(definition) {
                 if key != "humancraft:missing" && !texture_keys.contains(&key.to_string()) {
                     texture_keys.push(key.to_string());
                 }
@@ -250,6 +257,7 @@ pub(super) fn shaded_block_color(
 
 pub(super) fn render_material(
     block: BlockId,
+    state: BlockState,
     direction: FaceDirection,
     blocks: &BlockRegistry,
 ) -> ([f32; 3], String) {
@@ -265,12 +273,96 @@ pub(super) fn render_material(
         return ([1.0, 0.0, 1.0], "humancraft:missing".to_string());
     };
 
-    let texture_key = texture_key_for_direction(definition, direction).to_string();
+    let texture_key = texture_key_for_state_direction(definition, state, direction).to_string();
     if texture_key == "humancraft:missing" {
         return (shaded_block_color(block, direction, blocks), texture_key);
     }
 
     ([shade.min(1.0); 3], texture_key)
+}
+
+pub(super) fn texture_key_for_state_direction(
+    definition: &crate::engine::world::BlockDefinition,
+    state: BlockState,
+    direction: FaceDirection,
+) -> &str {
+    if let BlockProperties::Axis { axis } = state.properties {
+        return texture_key_for_axis_direction(definition, axis, direction);
+    }
+    let facing = match state.properties {
+        BlockProperties::HorizontalFacing { facing } => Some(facing),
+        BlockProperties::Furnace { facing, lit } => {
+            if lit
+                && rotate_face_to_block_front(direction, facing) == FaceDirection::North
+                && definition.key == "humancraft:furnace"
+            {
+                return "humancraft:block/furnace/front_on";
+            }
+            Some(facing)
+        }
+        _ => None,
+    };
+    let Some(facing) = facing else {
+        return texture_key_for_direction(definition, direction);
+    };
+    match rotate_face_to_block_front(direction, facing) {
+        FaceDirection::North => &definition.textures.north,
+        FaceDirection::South => &definition.textures.south,
+        FaceDirection::East => &definition.textures.east,
+        FaceDirection::West => &definition.textures.west,
+        FaceDirection::Up => &definition.textures.top,
+        FaceDirection::Down => &definition.textures.bottom,
+    }
+}
+
+fn texture_key_for_axis_direction(
+    definition: &crate::engine::world::BlockDefinition,
+    axis: Axis,
+    direction: FaceDirection,
+) -> &str {
+    let is_cap_face = match axis {
+        Axis::X => matches!(direction, FaceDirection::East | FaceDirection::West),
+        Axis::Y => matches!(direction, FaceDirection::Up | FaceDirection::Down),
+        Axis::Z => matches!(direction, FaceDirection::North | FaceDirection::South),
+    };
+    if is_cap_face {
+        &definition.textures.top
+    } else {
+        &definition.textures.north
+    }
+}
+
+fn rotate_face_to_block_front(
+    world_direction: FaceDirection,
+    facing: HorizontalDirection,
+) -> FaceDirection {
+    match world_direction {
+        FaceDirection::Up | FaceDirection::Down => world_direction,
+        FaceDirection::North => match facing {
+            HorizontalDirection::North => FaceDirection::North,
+            HorizontalDirection::South => FaceDirection::South,
+            HorizontalDirection::East => FaceDirection::West,
+            HorizontalDirection::West => FaceDirection::East,
+        },
+        FaceDirection::South => match facing {
+            HorizontalDirection::North => FaceDirection::South,
+            HorizontalDirection::South => FaceDirection::North,
+            HorizontalDirection::East => FaceDirection::East,
+            HorizontalDirection::West => FaceDirection::West,
+        },
+        FaceDirection::East => match facing {
+            HorizontalDirection::North => FaceDirection::East,
+            HorizontalDirection::South => FaceDirection::West,
+            HorizontalDirection::East => FaceDirection::North,
+            HorizontalDirection::West => FaceDirection::South,
+        },
+        FaceDirection::West => match facing {
+            HorizontalDirection::North => FaceDirection::West,
+            HorizontalDirection::South => FaceDirection::East,
+            HorizontalDirection::East => FaceDirection::South,
+            HorizontalDirection::West => FaceDirection::North,
+        },
+    }
 }
 
 pub(super) fn texture_key_for_direction(
@@ -296,6 +388,16 @@ pub(super) fn block_texture_keys(definition: &crate::engine::world::BlockDefinit
         &definition.textures.east,
         &definition.textures.west,
     ]
+}
+
+fn extra_block_texture_keys(
+    definition: &crate::engine::world::BlockDefinition,
+) -> impl Iterator<Item = &'static str> {
+    if definition.key == "humancraft:furnace" {
+        Some("humancraft:block/furnace/front_on").into_iter()
+    } else {
+        None.into_iter()
+    }
 }
 
 fn item_texture_keys(items: &ItemRegistry) -> Vec<&str> {

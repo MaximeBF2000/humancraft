@@ -6,22 +6,33 @@ impl RenderState {
         let delta_seconds = now.duration_since(self.last_frame).as_secs_f32().min(0.1);
         self.last_frame = now;
         let mut dirty_chunks = Vec::new();
-        if self.mode == AppMode::InGame && !self.paused && !self.inventory_open {
+        if self.mode == AppMode::InGame && !self.paused {
             if let Some(world) = self.world.as_mut() {
-                self.camera.update(&self.input, world, delta_seconds);
+                self.block_entity_tick_accumulator =
+                    (self.block_entity_tick_accumulator + delta_seconds).min(0.25);
+                while self.block_entity_tick_accumulator >= PHYSICS_TICK_SECONDS {
+                    dirty_chunks.extend(world.tick_block_entities());
+                    dirty_chunks.extend(world.tick_block_behaviors());
+                    self.block_entity_tick_accumulator -= PHYSICS_TICK_SECONDS;
+                }
+                if !self.inventory_open {
+                    self.camera.update(&self.input, world, delta_seconds);
+                }
                 dirty_chunks.extend(world.ensure_chunks_around_render_position_with_store(
                     self.camera.position,
                     MAX_CHUNK_LOADS_PER_FRAME,
                     &self.save_store,
                 ));
             }
-            if let Some(button) = self.held_block_interaction.repeat_button(delta_seconds) {
-                dirty_chunks.extend(self.apply_block_interaction(button));
-            }
-            if self.held_block_interaction.is_held(MouseButton::Left) {
-                dirty_chunks.extend(self.continue_block_break(delta_seconds));
-            } else if let Some(world) = self.world.as_mut() {
-                world.clear_block_break_progress();
+            if !self.inventory_open {
+                if let Some(button) = self.held_block_interaction.repeat_button(delta_seconds) {
+                    dirty_chunks.extend(self.apply_block_interaction(button));
+                }
+                if self.held_block_interaction.is_held(MouseButton::Left) {
+                    dirty_chunks.extend(self.continue_block_break(delta_seconds));
+                } else if let Some(world) = self.world.as_mut() {
+                    world.clear_block_break_progress();
+                }
             }
         }
         if self.mode == AppMode::InGame && !self.paused {
@@ -57,26 +68,38 @@ impl RenderState {
 
         match button {
             MouseButton::Right => {
-                if self
-                    .world
-                    .as_ref()
-                    .and_then(|world| {
+                if !self.modifier_shift {
+                    let interaction = self.world.as_ref().and_then(|world| {
                         world
                             .block(hit.block)
                             .and_then(|block| world.blocks.get(block))
-                    })
-                    .is_some_and(|definition| definition.has_tag("crafting_table"))
-                {
-                    self.open_crafting_table();
-                    return Vec::new();
+                            .map(|definition| {
+                                (
+                                    definition.has_tag("crafting_table"),
+                                    definition.has_tag("chest") || definition.has_tag("furnace"),
+                                )
+                            })
+                    });
+                    match interaction {
+                        Some((true, _)) => {
+                            self.open_crafting_table();
+                            return Vec::new();
+                        }
+                        Some((_, true)) => {
+                            self.open_container(hit.block);
+                            return Vec::new();
+                        }
+                        _ => {}
+                    }
                 }
                 self.world
                     .as_mut()
                     .map(|world| {
                         world.place_selected_hotbar_block_for_player(
-                            hit.previous,
+                            hit,
                             self.selected_hotbar_slot,
                             self.camera.position,
+                            self.camera.forward(),
                         )
                     })
                     .unwrap_or_default()
@@ -105,12 +128,38 @@ impl RenderState {
         let ui_mesh = if self.mode == AppMode::InGame && !self.paused {
             self.world.as_ref().map(|world| {
                 let cursor_point = cursor_to_ui_point(self.cursor_position, self.size);
+                let container_inventory = self.open_container.and_then(|position| {
+                    match world.block_entities.get(&position) {
+                        Some(BlockEntity::Chest(inventory)) => Some(inventory),
+                        Some(BlockEntity::Furnace(furnace)) => Some(&furnace.inventory),
+                        None => None,
+                    }
+                });
+                let furnace_state = self.open_container.and_then(|position| {
+                    match world.block_entities.get(&position) {
+                        Some(BlockEntity::Furnace(furnace)) => Some(FurnaceUiState {
+                            burn_ratio: if furnace.fuel_ticks == 0 {
+                                0.0
+                            } else {
+                                furnace.burn_ticks as f32 / furnace.fuel_ticks as f32
+                            },
+                            cook_ratio: if furnace.cook_ticks_total == 0 {
+                                0.0
+                            } else {
+                                furnace.cook_ticks as f32 / furnace.cook_ticks_total as f32
+                            },
+                        }),
+                        _ => None,
+                    }
+                });
                 build_gameplay_ui_mesh(
                     world,
                     self.inventory_open,
                     self.crafting_ui_kind(),
                     self.active_crafting_grid(),
                     self.crafting_result,
+                    container_inventory,
+                    furnace_state,
                     aspect,
                     self.selected_hotbar_slot,
                     self.inventory_cursor,
@@ -125,6 +174,13 @@ impl RenderState {
         };
         let textured_ui_mesh = if self.mode == AppMode::InGame && !self.paused {
             self.world.as_ref().map(|world| {
+                let container_inventory = self.open_container.and_then(|position| {
+                    match world.block_entities.get(&position) {
+                        Some(BlockEntity::Chest(inventory)) => Some(inventory),
+                        Some(BlockEntity::Furnace(furnace)) => Some(&furnace.inventory),
+                        None => None,
+                    }
+                });
                 build_inventory_icon_mesh(
                     world,
                     &self.texture_atlas,
@@ -132,6 +188,7 @@ impl RenderState {
                     self.crafting_ui_kind(),
                     self.active_crafting_grid(),
                     self.crafting_result,
+                    container_inventory,
                     aspect,
                     self.selected_hotbar_slot,
                     self.inventory_cursor,

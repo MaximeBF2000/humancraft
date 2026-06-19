@@ -1,15 +1,21 @@
 use super::spatial::{split_world_block_position, world_block_from_render};
 use super::ui::{UiPoint, UiRect, shortcut_hit_index, shortcut_row_rect};
 use super::*;
+use crate::app::windowed::client_world::{BlockEntity, FurnaceEntity, RaycastHit};
 use crate::content::{GameContent, bootstrap_content, default_generation_pipeline};
 use crate::engine::mesh::chunk_mesher::{FaceDirection, MeshQuad};
-use crate::engine::world::{BlockPosition, CHUNK_SIZE, Chunk, ChunkPosition, ItemId, LootEntity};
+use crate::engine::world::{
+    Axis, BlockPosition, BlockProperties, BlockState, CHUNK_SIZE, Chunk, ChunkPosition,
+    HorizontalDirection, ItemId, ItemStack, ItemStackMetadata, LootEntity, SlabOrientation,
+    StairHalf,
+};
 
 fn test_client_world(content: &GameContent) -> ClientWorld {
     ClientWorld::new(
         content.blocks.clone(),
         content.items.clone(),
         content.recipes.clone(),
+        content.smelting_recipes.clone(),
         content.block_ids,
         default_generation_pipeline(content.block_ids),
         GenerationContext {
@@ -19,6 +25,22 @@ fn test_client_world(content: &GameContent) -> ClientWorld {
         CLIENT_RENDER_DISTANCE_CHUNKS,
         "test-world".to_string(),
     )
+}
+
+fn placement_hit_for(position: WorldBlockPosition) -> RaycastHit {
+    RaycastHit {
+        block: WorldBlockPosition {
+            y: position.y - 1,
+            ..position
+        },
+        previous: position,
+        face: FaceDirection::Up,
+        hit_position: Vec3::new(
+            position.x as f32 - 7.5,
+            position.y as f32 - 64.0,
+            position.z as f32 - 7.5,
+        ),
+    }
 }
 
 #[test]
@@ -129,6 +151,7 @@ fn preview_filter_keeps_real_underground_faces_visible() {
     let content = bootstrap_content().unwrap();
     let wall = MeshQuad {
         block: content.block_ids.stone,
+        state: BlockState::new(content.block_ids.stone),
         direction: FaceDirection::North,
         vertices: [
             [0.0, 0.0, 0.0],
@@ -196,6 +219,7 @@ fn preview_filter_hides_outer_render_boundary_faces() {
     let content = bootstrap_content().unwrap();
     let outer_west_wall = MeshQuad {
         block: content.block_ids.stone,
+        state: BlockState::new(content.block_ids.stone),
         direction: FaceDirection::West,
         vertices: [
             [0.0, 60.0, 0.0],
@@ -237,6 +261,7 @@ fn preview_filter_hides_loaded_world_bottom_boundary_faces() {
     let content = bootstrap_content().unwrap();
     let bottom = MeshQuad {
         block: content.block_ids.bedrock,
+        state: BlockState::new(content.block_ids.bedrock),
         direction: FaceDirection::Down,
         vertices: [
             [0.0, 0.0, 0.0],
@@ -380,6 +405,7 @@ fn saved_chunks_override_generation_when_streaming() {
         content.blocks.clone(),
         content.items.clone(),
         content.recipes.clone(),
+        content.smelting_recipes.clone(),
         content.block_ids,
         default_generation_pipeline(content.block_ids),
         GenerationContext {
@@ -421,6 +447,397 @@ fn client_world_can_break_and_place_blocks() {
         vec![ChunkPosition { x: 0, z: 0 }]
     );
     assert!(world.is_solid(position));
+}
+
+#[test]
+fn horizontal_facing_blocks_face_the_player_when_placed() {
+    let content = bootstrap_content().unwrap();
+    let mut world = test_client_world(&content);
+    let mut chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, content.block_ids.air);
+    chunk
+        .set_block(BlockPosition { x: 1, y: 1, z: 1 }, content.block_ids.stone)
+        .unwrap();
+    world.insert_chunk(chunk);
+    let chest_item = content.items.id_for_key("humancraft:chest").unwrap();
+    world
+        .player_inventory
+        .set_slot(0, Some(ItemStack::new(chest_item, 1)));
+
+    world.place_selected_hotbar_block_for_player(
+        RaycastHit {
+            block: WorldBlockPosition { x: 1, y: 1, z: 1 },
+            previous: WorldBlockPosition { x: 1, y: 1, z: 2 },
+            face: FaceDirection::South,
+            hit_position: Vec3::new(-6.5, -62.5, -5.0),
+        },
+        0,
+        Vec3::new(20.0, 20.0, 20.0),
+        Vec3::new(0.0, 0.0, -1.0),
+    );
+
+    assert_eq!(
+        world
+            .block_state(WorldBlockPosition { x: 1, y: 1, z: 2 })
+            .map(|state| state.properties),
+        Some(BlockProperties::HorizontalFacing {
+            facing: HorizontalDirection::South
+        })
+    );
+}
+
+#[test]
+fn wooden_slabs_place_against_clicked_face_and_merge_opposites() {
+    let content = bootstrap_content().unwrap();
+    let mut world = test_client_world(&content);
+    let mut chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, content.block_ids.air);
+    chunk
+        .set_block(BlockPosition { x: 1, y: 1, z: 1 }, content.block_ids.stone)
+        .unwrap();
+    world.insert_chunk(chunk);
+    let slab_item = content.items.id_for_key("humancraft:wooden_slab").unwrap();
+    world
+        .player_inventory
+        .set_slot(0, Some(ItemStack::new(slab_item, 2)));
+
+    let first_hit = RaycastHit {
+        block: WorldBlockPosition { x: 1, y: 1, z: 1 },
+        previous: WorldBlockPosition { x: 2, y: 1, z: 1 },
+        face: FaceDirection::East,
+        hit_position: Vec3::new(-6.0, -62.5, -6.5),
+    };
+    world.place_selected_hotbar_block_for_player(
+        first_hit,
+        0,
+        Vec3::new(20.0, 20.0, 20.0),
+        Vec3::Z,
+    );
+
+    assert_eq!(
+        world
+            .block_state(WorldBlockPosition { x: 2, y: 1, z: 1 })
+            .map(|state| state.properties),
+        Some(BlockProperties::Slab {
+            orientation: SlabOrientation::West
+        })
+    );
+
+    world.place_selected_hotbar_block_for_player(
+        RaycastHit {
+            block: WorldBlockPosition { x: 2, y: 1, z: 1 },
+            previous: WorldBlockPosition { x: 1, y: 1, z: 1 },
+            face: FaceDirection::West,
+            hit_position: Vec3::new(-5.0, -62.5, -6.5),
+        },
+        0,
+        Vec3::new(20.0, 20.0, 20.0),
+        Vec3::Z,
+    );
+
+    assert_eq!(
+        world.block(WorldBlockPosition { x: 2, y: 1, z: 1 }),
+        Some(content.block_ids.oak_planks)
+    );
+}
+
+#[test]
+fn wooden_stair_placement_records_facing_and_half() {
+    let content = bootstrap_content().unwrap();
+    let mut world = test_client_world(&content);
+    let mut chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, content.block_ids.air);
+    chunk
+        .set_block(BlockPosition { x: 1, y: 1, z: 1 }, content.block_ids.stone)
+        .unwrap();
+    world.insert_chunk(chunk);
+    let stair_item = content
+        .items
+        .id_for_key("humancraft:wooden_stairs")
+        .unwrap();
+    world
+        .player_inventory
+        .set_slot(0, Some(ItemStack::new(stair_item, 1)));
+
+    world.place_selected_hotbar_block_for_player(
+        RaycastHit {
+            block: WorldBlockPosition { x: 1, y: 1, z: 1 },
+            previous: WorldBlockPosition { x: 1, y: 1, z: 2 },
+            face: FaceDirection::South,
+            hit_position: Vec3::new(-6.5, -62.25, -5.0),
+        },
+        0,
+        Vec3::new(20.0, 20.0, 20.0),
+        Vec3::new(1.0, 0.0, 0.0),
+    );
+
+    assert_eq!(
+        world
+            .block_state(WorldBlockPosition { x: 1, y: 1, z: 2 })
+            .map(|state| state.properties),
+        Some(BlockProperties::Stairs {
+            facing: HorizontalDirection::East,
+            half: StairHalf::Top,
+        })
+    );
+}
+
+#[test]
+fn oak_log_placement_records_axis_from_clicked_face() {
+    let content = bootstrap_content().unwrap();
+    let mut world = test_client_world(&content);
+    let mut chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, content.block_ids.air);
+    chunk
+        .set_block(BlockPosition { x: 1, y: 1, z: 1 }, content.block_ids.stone)
+        .unwrap();
+    world.insert_chunk(chunk);
+    let log_item = content.items.id_for_key("humancraft:oak_log").unwrap();
+    world
+        .player_inventory
+        .set_slot(0, Some(ItemStack::new(log_item, 1)));
+
+    world.place_selected_hotbar_block_for_player(
+        RaycastHit {
+            block: WorldBlockPosition { x: 1, y: 1, z: 1 },
+            previous: WorldBlockPosition { x: 2, y: 1, z: 1 },
+            face: FaceDirection::East,
+            hit_position: Vec3::new(-6.0, -62.5, -6.5),
+        },
+        0,
+        Vec3::new(20.0, 20.0, 20.0),
+        Vec3::Z,
+    );
+
+    assert_eq!(
+        world
+            .block_state(WorldBlockPosition { x: 2, y: 1, z: 1 })
+            .map(|state| state.properties),
+        Some(BlockProperties::Axis { axis: Axis::X })
+    );
+}
+
+#[test]
+fn chest_and_furnace_positions_create_container_entities_on_demand() {
+    let content = bootstrap_content().unwrap();
+    let mut world = test_client_world(&content);
+    let mut chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, content.block_ids.air);
+    chunk
+        .set_block(BlockPosition { x: 1, y: 1, z: 1 }, content.block_ids.chest)
+        .unwrap();
+    chunk
+        .set_block(
+            BlockPosition { x: 2, y: 1, z: 1 },
+            content.block_ids.furnace,
+        )
+        .unwrap();
+    world.insert_chunk(chunk);
+
+    assert!(world.ensure_block_entity_for_position(WorldBlockPosition { x: 1, y: 1, z: 1 }));
+    assert!(matches!(
+        world
+            .block_entities
+            .get(&WorldBlockPosition { x: 1, y: 1, z: 1 }),
+        Some(BlockEntity::Chest(_))
+    ));
+    assert!(world.ensure_block_entity_for_position(WorldBlockPosition { x: 2, y: 1, z: 1 }));
+    assert!(matches!(
+        world
+            .block_entities
+            .get(&WorldBlockPosition { x: 2, y: 1, z: 1 }),
+        Some(BlockEntity::Furnace(_))
+    ));
+}
+
+#[test]
+fn broken_chest_item_preserves_contents_when_replaced() {
+    let content = bootstrap_content().unwrap();
+    let mut world = test_client_world(&content);
+    let mut chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, content.block_ids.air);
+    chunk
+        .set_block(BlockPosition { x: 1, y: 1, z: 1 }, content.block_ids.chest)
+        .unwrap();
+    chunk
+        .set_block(BlockPosition { x: 1, y: 1, z: 0 }, content.block_ids.stone)
+        .unwrap();
+    world.insert_chunk(chunk);
+    let chest_position = WorldBlockPosition { x: 1, y: 1, z: 1 };
+    let dirt = content.items.id_for_key("humancraft:dirt").unwrap();
+    let chest_item = content.items.id_for_key("humancraft:chest").unwrap();
+    let mut chest_inventory = Inventory::new(27, 0);
+    chest_inventory.set_slot(0, Some(ItemStack::new(dirt, 17)));
+    world
+        .block_entities
+        .insert(chest_position, BlockEntity::Chest(chest_inventory));
+
+    world.break_block(chest_position);
+
+    assert_eq!(world.block(chest_position), Some(content.block_ids.air));
+    assert_eq!(world.loot_entities.len(), 1);
+    let dropped_chest = world.loot_entities[0].stack;
+    assert_eq!(dropped_chest.item, chest_item);
+    assert!(matches!(
+        dropped_chest.metadata,
+        Some(ItemStackMetadata::ChestInventory(_))
+    ));
+
+    world.player_inventory.set_slot(0, Some(dropped_chest));
+    world.loot_entities.clear();
+    world.place_selected_hotbar_block_for_player(
+        RaycastHit {
+            block: WorldBlockPosition { x: 1, y: 1, z: 0 },
+            previous: chest_position,
+            face: FaceDirection::South,
+            hit_position: Vec3::new(-6.5, -62.5, -7.0),
+        },
+        0,
+        Vec3::new(20.0, 20.0, 20.0),
+        Vec3::new(0.0, 0.0, -1.0),
+    );
+
+    let Some(BlockEntity::Chest(restored_inventory)) = world.block_entities.get(&chest_position)
+    else {
+        panic!("replaced chest should have a chest entity");
+    };
+    assert_eq!(restored_inventory.slot(0), Some(ItemStack::new(dirt, 17)));
+}
+
+#[test]
+fn furnace_tick_smells_registered_recipe_with_registered_fuel() {
+    let content = bootstrap_content().unwrap();
+    let mut world = test_client_world(&content);
+    let position = WorldBlockPosition { x: 1, y: 1, z: 1 };
+    let sand = content.items.id_for_key("humancraft:sand").unwrap();
+    let coal = content.items.id_for_key("humancraft:coal").unwrap();
+    let glass = content.items.id_for_key("humancraft:glass").unwrap();
+    let mut inventory = Inventory::new(3, 0);
+    inventory.set_slot(0, Some(ItemStack::new(sand, 1)));
+    inventory.set_slot(1, Some(ItemStack::new(coal, 1)));
+    world.block_entities.insert(
+        position,
+        BlockEntity::Furnace(FurnaceEntity {
+            inventory,
+            burn_ticks: 0,
+            fuel_ticks: 0,
+            cook_ticks: 0,
+            cook_ticks_total: 200,
+        }),
+    );
+
+    for _ in 0..199 {
+        world.tick_block_entities();
+    }
+
+    let Some(BlockEntity::Furnace(furnace)) = world.block_entities.get(&position) else {
+        panic!("furnace entity should remain");
+    };
+    assert_eq!(furnace.inventory.slot(2), None);
+    assert_eq!(furnace.cook_ticks, 199);
+
+    world.tick_block_entities();
+
+    let Some(BlockEntity::Furnace(furnace)) = world.block_entities.get(&position) else {
+        panic!("furnace entity should remain");
+    };
+    assert_eq!(furnace.inventory.slot(0), None);
+    assert_eq!(furnace.inventory.slot(1), None);
+    assert_eq!(furnace.inventory.slot(2), Some(ItemStack::new(glass, 1)));
+}
+
+#[test]
+fn lit_furnace_uses_active_texture_on_the_facing_front() {
+    let content = bootstrap_content().unwrap();
+    let furnace = content.blocks.get(content.block_ids.furnace).unwrap();
+    let cases = [
+        (HorizontalDirection::North, FaceDirection::North),
+        (HorizontalDirection::South, FaceDirection::South),
+        (HorizontalDirection::East, FaceDirection::East),
+        (HorizontalDirection::West, FaceDirection::West),
+    ];
+
+    for (facing, front_face) in cases {
+        let state = BlockState::with_properties(
+            content.block_ids.furnace,
+            BlockProperties::Furnace { facing, lit: true },
+        );
+        assert_eq!(
+            texture_key_for_state_direction(furnace, state, front_face),
+            "humancraft:block/furnace/front_on",
+            "lit furnace facing {facing:?} should use active texture on {front_face:?}"
+        );
+    }
+}
+
+#[test]
+fn client_world_round_trips_saved_chest_and_furnace_entities() {
+    let content = bootstrap_content().unwrap();
+    let mut world = test_client_world(&content);
+    let mut chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, content.block_ids.air);
+    chunk
+        .set_block(BlockPosition { x: 1, y: 1, z: 1 }, content.block_ids.chest)
+        .unwrap();
+    chunk
+        .set_block(
+            BlockPosition { x: 2, y: 1, z: 1 },
+            content.block_ids.furnace,
+        )
+        .unwrap();
+    world.insert_chunk(chunk);
+    let chest_position = WorldBlockPosition { x: 1, y: 1, z: 1 };
+    let furnace_position = WorldBlockPosition { x: 2, y: 1, z: 1 };
+    let dirt = content.items.id_for_key("humancraft:dirt").unwrap();
+    let sand = content.items.id_for_key("humancraft:sand").unwrap();
+    let coal = content.items.id_for_key("humancraft:coal").unwrap();
+    let mut chest_inventory = Inventory::new(27, 0);
+    chest_inventory.set_slot(0, Some(ItemStack::new(dirt, 9)));
+    let mut furnace_inventory = Inventory::new(3, 0);
+    furnace_inventory.set_slot(0, Some(ItemStack::new(sand, 2)));
+    furnace_inventory.set_slot(1, Some(ItemStack::new(coal, 1)));
+    world
+        .block_entities
+        .insert(chest_position, BlockEntity::Chest(chest_inventory));
+    world.block_entities.insert(
+        furnace_position,
+        BlockEntity::Furnace(FurnaceEntity {
+            inventory: furnace_inventory,
+            burn_ticks: 40,
+            fuel_ticks: 1600,
+            cook_ticks: 25,
+            cook_ticks_total: 200,
+        }),
+    );
+
+    let saved_entities = world.block_entities_to_save();
+    let mut restored = test_client_world(&content);
+    let mut restored_chunk = Chunk::filled(ChunkPosition { x: 0, z: 0 }, content.block_ids.air);
+    restored_chunk
+        .set_block(BlockPosition { x: 1, y: 1, z: 1 }, content.block_ids.chest)
+        .unwrap();
+    restored_chunk
+        .set_block(
+            BlockPosition { x: 2, y: 1, z: 1 },
+            content.block_ids.furnace,
+        )
+        .unwrap();
+    restored.insert_chunk(restored_chunk);
+    restored.load_saved_block_entities(saved_entities);
+
+    let Some(BlockEntity::Chest(restored_chest)) = restored.block_entities.get(&chest_position)
+    else {
+        panic!("saved chest should restore");
+    };
+    assert_eq!(restored_chest.slot(0), Some(ItemStack::new(dirt, 9)));
+    let Some(BlockEntity::Furnace(restored_furnace)) =
+        restored.block_entities.get(&furnace_position)
+    else {
+        panic!("saved furnace should restore");
+    };
+    assert_eq!(
+        restored_furnace.inventory.slot(0),
+        Some(ItemStack::new(sand, 2))
+    );
+    assert_eq!(
+        restored_furnace.inventory.slot(1),
+        Some(ItemStack::new(coal, 1))
+    );
+    assert_eq!(restored_furnace.burn_ticks, 40);
+    assert_eq!(restored_furnace.cook_ticks, 25);
 }
 
 #[test]
@@ -791,7 +1208,12 @@ fn selected_hotbar_item_controls_block_placement() {
         .set_slot(0, Some(ItemStack::new(coal, 1)));
     assert!(
         world
-            .place_selected_hotbar_block_for_player(position, 0, player_eye)
+            .place_selected_hotbar_block_for_player(
+                placement_hit_for(position),
+                0,
+                player_eye,
+                Vec3::Z
+            )
             .is_empty()
     );
     assert_eq!(world.block(position), Some(content.block_ids.air));
@@ -800,7 +1222,12 @@ fn selected_hotbar_item_controls_block_placement() {
         .player_inventory
         .set_slot(0, Some(ItemStack::new(dirt, 2)));
     assert_eq!(
-        world.place_selected_hotbar_block_for_player(position, 0, player_eye),
+        world.place_selected_hotbar_block_for_player(
+            placement_hit_for(position),
+            0,
+            player_eye,
+            Vec3::Z
+        ),
         vec![ChunkPosition { x: 0, z: 0 }]
     );
     assert_eq!(world.block(position), Some(content.block_ids.dirt));
@@ -815,7 +1242,12 @@ fn selected_hotbar_item_controls_block_placement() {
         .player_inventory
         .set_slot(0, Some(ItemStack::new(cobblestone, 1)));
     assert_eq!(
-        world.place_selected_hotbar_block_for_player(cobblestone_position, 0, player_eye),
+        world.place_selected_hotbar_block_for_player(
+            placement_hit_for(cobblestone_position),
+            0,
+            player_eye,
+            Vec3::Z,
+        ),
         vec![ChunkPosition { x: 0, z: 0 }]
     );
     assert_eq!(

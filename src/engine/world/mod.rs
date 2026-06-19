@@ -7,14 +7,21 @@ pub mod generation;
 pub mod item;
 pub mod loot;
 pub mod save;
+pub mod smelting;
 
-pub use block::{BlockDefinition, BlockHarvestRequirement, BlockId, BlockRegistry, BlockTextures};
+pub use block::{
+    Axis, BlockAabb, BlockBehavior, BlockDefinition, BlockHarvestRequirement, BlockId,
+    BlockProperties, BlockRegistry, BlockShape, BlockState, BlockTextures, ChanceDrop,
+    GrassSpreadBehavior, HorizontalDirection, LeafDecayBehavior, PlacementRuleKind,
+    SaplingGrowthBehavior, SlabOrientation, StairHalf, block_state_aabbs,
+};
 pub use chunk::{BlockPosition, CHUNK_HEIGHT, CHUNK_SIZE, CHUNK_VOLUME, Chunk, ChunkPosition};
 pub use crafting::{
     CraftingRecipeDefinition, CraftingRecipeRegistry, consume_crafting_ingredients, crafting_result,
 };
 pub use item::{
-    Inventory, ItemDefinition, ItemId, ItemRegistry, ItemStack, ToolDefinition, ToolKind,
-    ToolMaterial,
+    Inventory, ItemDefinition, ItemId, ItemRegistry, ItemStack, ItemStackMetadata, ToolDefinition,
+    ToolKind, ToolMaterial,
 };
 pub use loot::LootEntity;
+pub use smelting::{SmeltingRecipeDefinition, SmeltingRecipeRegistry, smelting_result};

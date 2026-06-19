@@ -6,9 +6,12 @@ The chunk mesher converts chunk block IDs into renderer-neutral visible faces.
 
 ## Responsibilities
 
-- Iterate over blocks in a chunk.
+- Iterate over block states in a chunk.
 - Skip invisible or non-solid air-like blocks.
 - Emit faces where a neighboring block does not occlude the face.
+- Expand shaped block states before emitting faces. Slabs and stairs use one or
+  more cuboids; crossed plant blocks such as oak saplings emit two diagonal
+  texture planes, double-sided.
 - Keep GPU, texture, and draw-call details out of the world layer.
 
 ## Inputs
@@ -36,11 +39,16 @@ The chunk mesher converts chunk block IDs into renderer-neutral visible faces.
   chunks. Missing chunks can be generated ahead of their GPU buffers; the
   renderer queues dirty chunk positions and rebuilds the closest pending chunk
   meshes first.
+- State-derived block AABBs are stack-backed fixed-size values instead of
+  heap-allocated vectors. Keep this allocation-free path intact because chunk
+  meshing and collision call it for many blocks per frame or remesh.
+- Cross-shaped blocks are visible even when they are transparent and non-solid.
+  They use normal block texture metadata but do not contribute collision AABBs.
 
 ## Dependencies
 
 - Chunk system.
-- Block definitions for solidity and transparency.
+- Block definitions for solidity, transparency, shape, and texture metadata.
 
 ## Extension Points
 
@@ -57,3 +65,6 @@ The chunk mesher converts chunk block IDs into renderer-neutral visible faces.
 - Quads do not include UVs, normals, lighting, or material IDs yet.
 - The finite-world preview filter is a renderer-side stopgap until chunk
   streaming, caves, and underground visibility are modeled more completely.
+- Partial blocks do not currently occlude neighboring block faces. This avoids
+  incorrect culling for slabs and stairs, but it can emit extra hidden faces
+  until shape-aware face culling is added.

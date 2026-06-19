@@ -1,7 +1,10 @@
 //! HumanCraft recipe registration.
 
 use crate::engine::registry::RegistryError;
-use crate::engine::world::{CraftingRecipeDefinition, CraftingRecipeRegistry};
+use crate::engine::world::{
+    CraftingRecipeDefinition, CraftingRecipeRegistry, SmeltingRecipeDefinition,
+    SmeltingRecipeRegistry,
+};
 
 pub fn register_recipes(recipes: &mut CraftingRecipeRegistry) -> Result<(), RegistryError> {
     recipes.register(CraftingRecipeDefinition::shapeless(
@@ -33,11 +36,116 @@ pub fn register_recipes(recipes: &mut CraftingRecipeRegistry) -> Result<(), Regi
         "humancraft:stick",
         4,
     ))?;
+    recipes.register(CraftingRecipeDefinition::shaped(
+        "humancraft:chest_from_oak_planks",
+        3,
+        3,
+        [
+            Some("humancraft:oak_planks"),
+            Some("humancraft:oak_planks"),
+            Some("humancraft:oak_planks"),
+            Some("humancraft:oak_planks"),
+            None,
+            Some("humancraft:oak_planks"),
+            Some("humancraft:oak_planks"),
+            Some("humancraft:oak_planks"),
+            Some("humancraft:oak_planks"),
+        ],
+        "humancraft:chest",
+        1,
+    ))?;
+    recipes.register(CraftingRecipeDefinition::shaped(
+        "humancraft:furnace_from_cobblestone",
+        3,
+        3,
+        [
+            Some("humancraft:cobblestone"),
+            Some("humancraft:cobblestone"),
+            Some("humancraft:cobblestone"),
+            Some("humancraft:cobblestone"),
+            None,
+            Some("humancraft:cobblestone"),
+            Some("humancraft:cobblestone"),
+            Some("humancraft:cobblestone"),
+            Some("humancraft:cobblestone"),
+        ],
+        "humancraft:furnace",
+        1,
+    ))?;
+    recipes.register(CraftingRecipeDefinition::shaped(
+        "humancraft:wooden_stairs_from_oak_planks",
+        3,
+        3,
+        [
+            Some("humancraft:oak_planks"),
+            None,
+            None,
+            Some("humancraft:oak_planks"),
+            Some("humancraft:oak_planks"),
+            None,
+            Some("humancraft:oak_planks"),
+            Some("humancraft:oak_planks"),
+            Some("humancraft:oak_planks"),
+        ],
+        "humancraft:wooden_stairs",
+        4,
+    ))?;
+    recipes.register(CraftingRecipeDefinition::shaped(
+        "humancraft:wooden_stairs_from_oak_planks_mirrored",
+        3,
+        3,
+        [
+            None,
+            None,
+            Some("humancraft:oak_planks"),
+            None,
+            Some("humancraft:oak_planks"),
+            Some("humancraft:oak_planks"),
+            Some("humancraft:oak_planks"),
+            Some("humancraft:oak_planks"),
+            Some("humancraft:oak_planks"),
+        ],
+        "humancraft:wooden_stairs",
+        4,
+    ))?;
+    recipes.register(CraftingRecipeDefinition::shaped(
+        "humancraft:wooden_slab_from_oak_planks",
+        3,
+        1,
+        [
+            Some("humancraft:oak_planks"),
+            Some("humancraft:oak_planks"),
+            Some("humancraft:oak_planks"),
+        ],
+        "humancraft:wooden_slab",
+        6,
+    ))?;
 
     register_tool_recipes(recipes, "wood", "humancraft:oak_planks", "wooden")?;
     register_tool_recipes(recipes, "stone", "humancraft:cobblestone", "stone")?;
     register_tool_recipes(recipes, "iron", "humancraft:iron_ingot", "iron")?;
     register_tool_recipes(recipes, "diamond", "humancraft:diamond", "diamond")
+}
+
+pub fn register_smelting_recipes(
+    recipes: &mut SmeltingRecipeRegistry,
+) -> Result<(), RegistryError> {
+    recipes.register(SmeltingRecipeDefinition::new(
+        "humancraft:smelt_sand_to_glass",
+        "humancraft:sand",
+        "humancraft:glass",
+        1,
+        200,
+    ))?;
+    recipes
+        .register(SmeltingRecipeDefinition::new(
+            "humancraft:smelt_raw_iron_to_iron_ingot",
+            "humancraft:raw_iron",
+            "humancraft:iron_ingot",
+            1,
+            200,
+        ))
+        .map(|_| ())
 }
 
 fn register_tool_recipes(

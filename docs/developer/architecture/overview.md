@@ -23,6 +23,12 @@ implementation slice.
 - Properties live in definitions stored in registries.
 - Inventory, crafting, and loot store generic item stacks, not content-specific
   values.
+- Chunks store `BlockState` values so placement-specific properties such as
+  facing, slab orientation, stair half, furnace lit state, leaf persistence, and
+  sapling growth stage stay separate from block definitions.
+- Reusable block behavior data lives on block definitions. The current
+  windowed-client tick system consumes that data for gravity, leaf decay, grass
+  spread, and sapling growth without hard-coding individual block keys.
 - Generation is a pipeline of independent stages.
 - Rendering is not allowed to own gameplay logic.
 - Content is allowed to name `humancraft:*` keys; engine code is not.

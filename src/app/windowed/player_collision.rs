@@ -1,5 +1,7 @@
 use glam::Vec3;
 
+use crate::engine::world::{BlockState, block_state_aabbs};
+
 use super::client_world::ClientWorld;
 use super::constants::{PLAYER_STANDING_EYE_HEIGHT, SNEAK_EDGE_PROBE_DEPTH};
 use super::spatial::{
@@ -92,15 +94,40 @@ impl ClientWorld {
         position: WorldBlockPosition,
         player_eye_position: Vec3,
     ) -> bool {
-        let block_min = Vec3::new(
-            position.x as f32 - 8.0,
-            position.y as f32 - 64.0,
-            position.z as f32 - 8.0,
-        );
-        let block_max = block_min + Vec3::splat(1.0);
-        let (player_min, player_max) = player_aabb(player_eye_position);
+        let Some(state) = self.block_state(position) else {
+            return false;
+        };
+        self.block_intersects_player_state(position, state, player_eye_position)
+    }
 
-        aabb_intersects(block_min, block_max, player_min, player_max)
+    pub(super) fn block_intersects_player_state(
+        &self,
+        position: WorldBlockPosition,
+        state: BlockState,
+        player_eye_position: Vec3,
+    ) -> bool {
+        let (player_min, player_max) = player_aabb(player_eye_position);
+        let Some(definition) = self.blocks.get(state.block) else {
+            return false;
+        };
+        for aabb in block_state_aabbs(definition, state).iter() {
+            let block_min = Vec3::new(
+                position.x as f32 - 8.0 + aabb.min[0],
+                position.y as f32 - 64.0 + aabb.min[1],
+                position.z as f32 - 8.0 + aabb.min[2],
+            );
+            let block_max = Vec3::new(
+                position.x as f32 - 8.0 + aabb.max[0],
+                position.y as f32 - 64.0 + aabb.max[1],
+                position.z as f32 - 8.0 + aabb.max[2],
+            );
+
+            if aabb_intersects(block_min, block_max, player_min, player_max) {
+                return true;
+            }
+        }
+
+        false
     }
 
     pub(super) fn collides_aabb(&self, min: Vec3, max: Vec3) -> bool {
@@ -115,7 +142,31 @@ impl ClientWorld {
         for y in min_y..=max_y {
             for z in min_z..=max_z {
                 for x in min_x..=max_x {
-                    if self.is_solid(WorldBlockPosition { x, y, z }) {
+                    let position = WorldBlockPosition { x, y, z };
+                    let Some(state) = self.block_state(position) else {
+                        continue;
+                    };
+                    let Some(definition) = self.blocks.get(state.block) else {
+                        continue;
+                    };
+                    for block_aabb in block_state_aabbs(definition, state).iter() {
+                        let block_min = Vec3::new(
+                            x as f32 - 8.0 + block_aabb.min[0],
+                            y as f32 - 64.0 + block_aabb.min[1],
+                            z as f32 - 8.0 + block_aabb.min[2],
+                        );
+                        let block_max = Vec3::new(
+                            x as f32 - 8.0 + block_aabb.max[0],
+                            y as f32 - 64.0 + block_aabb.max[1],
+                            z as f32 - 8.0 + block_aabb.max[2],
+                        );
+                        if aabb_intersects(min, max, block_min, block_max) {
+                            return true;
+                        }
+                    }
+                    if self.is_solid(position)
+                        && definition.shape == crate::engine::world::BlockShape::FullCube
+                    {
                         return true;
                     }
                 }

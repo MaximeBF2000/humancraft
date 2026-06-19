@@ -11,13 +11,16 @@ pub use blocks::BlockIds;
 pub use generation::default_generation_pipeline;
 
 use crate::engine::registry::RegistryError;
-use crate::engine::world::{BlockRegistry, CraftingRecipeRegistry, ItemRegistry};
+use crate::engine::world::{
+    BlockRegistry, CraftingRecipeRegistry, ItemRegistry, SmeltingRecipeRegistry,
+};
 
 #[derive(Debug, Clone)]
 pub struct GameContent {
     pub blocks: BlockRegistry,
     pub items: ItemRegistry,
     pub recipes: CraftingRecipeRegistry,
+    pub smelting_recipes: SmeltingRecipeRegistry,
     pub block_ids: BlockIds,
 }
 
@@ -30,11 +33,14 @@ pub fn bootstrap_content() -> Result<GameContent, RegistryError> {
 
     let mut recipes = CraftingRecipeRegistry::new();
     recipes::register_recipes(&mut recipes)?;
+    let mut smelting_recipes = SmeltingRecipeRegistry::new();
+    recipes::register_smelting_recipes(&mut smelting_recipes)?;
 
     Ok(GameContent {
         blocks,
         items,
         recipes,
+        smelting_recipes,
         block_ids,
     })
 }
@@ -73,6 +79,21 @@ mod tests {
         assert!(content.blocks.get_by_key("humancraft:sand").is_some());
         assert!(content.blocks.get_by_key("humancraft:sandstone").is_some());
         assert!(content.blocks.get_by_key("humancraft:bedrock").is_some());
+        assert!(content.blocks.get_by_key("humancraft:glass").is_some());
+        assert!(content.blocks.get_by_key("humancraft:chest").is_some());
+        assert!(content.blocks.get_by_key("humancraft:furnace").is_some());
+        assert!(
+            content
+                .blocks
+                .get_by_key("humancraft:wooden_stairs")
+                .is_some()
+        );
+        assert!(
+            content
+                .blocks
+                .get_by_key("humancraft:wooden_slab")
+                .is_some()
+        );
         assert!(content.items.get_by_key("humancraft:diamond").is_some());
         assert!(content.items.get_by_key("humancraft:stick").is_some());
         assert!(content.items.get_by_key("humancraft:iron_ingot").is_some());
@@ -89,6 +110,13 @@ mod tests {
                 .items
                 .get_by_key("humancraft:crafting_table")
                 .is_some()
+        );
+        assert_eq!(
+            content
+                .items
+                .get_by_key("humancraft:chest")
+                .map(|(_, item)| item.max_stack_size),
+            Some(1)
         );
         assert!(
             content
@@ -111,6 +139,30 @@ mod tests {
         assert!(
             content
                 .recipes
+                .get_by_key("humancraft:chest_from_oak_planks")
+                .is_some()
+        );
+        assert!(
+            content
+                .recipes
+                .get_by_key("humancraft:furnace_from_cobblestone")
+                .is_some()
+        );
+        assert!(
+            content
+                .recipes
+                .get_by_key("humancraft:wooden_stairs_from_oak_planks")
+                .is_some()
+        );
+        assert!(
+            content
+                .recipes
+                .get_by_key("humancraft:wooden_slab_from_oak_planks")
+                .is_some()
+        );
+        assert!(
+            content
+                .recipes
                 .get_by_key("humancraft:iron_pickaxe")
                 .is_some()
         );
@@ -122,6 +174,30 @@ mod tests {
             Some("humancraft:cobblestone")
         );
         assert_eq!(content.block_ids.air.raw(), 0);
+    }
+
+    #[test]
+    fn furnace_content_defines_fuels_and_smelting_recipes() {
+        let content = bootstrap_content().unwrap();
+        let coal = content.items.get_by_key("humancraft:coal").unwrap().1;
+        let planks = content.items.get_by_key("humancraft:oak_planks").unwrap().1;
+        let stick = content.items.get_by_key("humancraft:stick").unwrap().1;
+
+        assert_eq!(coal.fuel_ticks, Some(1600));
+        assert_eq!(planks.fuel_ticks, Some(300));
+        assert_eq!(stick.fuel_ticks, Some(100));
+        assert!(
+            content
+                .smelting_recipes
+                .get_by_key("humancraft:smelt_sand_to_glass")
+                .is_some()
+        );
+        assert!(
+            content
+                .smelting_recipes
+                .get_by_key("humancraft:smelt_raw_iron_to_iron_ingot")
+                .is_some()
+        );
     }
 
     #[test]
@@ -175,6 +251,73 @@ mod tests {
         assert_eq!(
             crafting_result(&content.recipes, &content.items, &grid, 3),
             Some(ItemStack::new(iron_pickaxe, 1))
+        );
+    }
+
+    #[test]
+    fn chest_recipe_uses_ring_of_oak_planks() {
+        let content = bootstrap_content().unwrap();
+        let oak_planks = content.items.id_for_key("humancraft:oak_planks").unwrap();
+        let chest = content.items.id_for_key("humancraft:chest").unwrap();
+        let mut grid = Inventory::new(9, 0);
+        for slot in [0, 1, 2, 3, 5, 6, 7, 8] {
+            grid.set_slot(slot, Some(ItemStack::new(oak_planks, 1)));
+        }
+
+        assert_eq!(
+            crafting_result(&content.recipes, &content.items, &grid, 3),
+            Some(ItemStack::new(chest, 1))
+        );
+    }
+
+    #[test]
+    fn furnace_recipe_uses_ring_of_cobblestone() {
+        let content = bootstrap_content().unwrap();
+        let cobblestone = content.items.id_for_key("humancraft:cobblestone").unwrap();
+        let furnace = content.items.id_for_key("humancraft:furnace").unwrap();
+        let mut grid = Inventory::new(9, 0);
+        for slot in [0, 1, 2, 3, 5, 6, 7, 8] {
+            grid.set_slot(slot, Some(ItemStack::new(cobblestone, 1)));
+        }
+
+        assert_eq!(
+            crafting_result(&content.recipes, &content.items, &grid, 3),
+            Some(ItemStack::new(furnace, 1))
+        );
+    }
+
+    #[test]
+    fn wooden_stair_recipe_uses_stair_shape() {
+        let content = bootstrap_content().unwrap();
+        let oak_planks = content.items.id_for_key("humancraft:oak_planks").unwrap();
+        let stairs = content
+            .items
+            .id_for_key("humancraft:wooden_stairs")
+            .unwrap();
+        let mut grid = Inventory::new(9, 0);
+        for slot in [0, 3, 4, 6, 7, 8] {
+            grid.set_slot(slot, Some(ItemStack::new(oak_planks, 1)));
+        }
+
+        assert_eq!(
+            crafting_result(&content.recipes, &content.items, &grid, 3),
+            Some(ItemStack::new(stairs, 4))
+        );
+    }
+
+    #[test]
+    fn wooden_slab_recipe_uses_three_oak_planks() {
+        let content = bootstrap_content().unwrap();
+        let oak_planks = content.items.id_for_key("humancraft:oak_planks").unwrap();
+        let slab = content.items.id_for_key("humancraft:wooden_slab").unwrap();
+        let mut grid = Inventory::new(9, 0);
+        for slot in [3, 4, 5] {
+            grid.set_slot(slot, Some(ItemStack::new(oak_planks, 1)));
+        }
+
+        assert_eq!(
+            crafting_result(&content.recipes, &content.items, &grid, 3),
+            Some(ItemStack::new(slab, 6))
         );
     }
 

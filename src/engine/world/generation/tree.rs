@@ -8,7 +8,9 @@ use crate::engine::world::generation::biome::BiomeSource;
 use crate::engine::world::generation::{
     GenerationContext, GenerationStage, value_noise_2d, world_x, world_z,
 };
-use crate::engine::world::{BlockId, BlockPosition, CHUNK_HEIGHT, CHUNK_SIZE, Chunk};
+use crate::engine::world::{
+    BlockId, BlockPosition, BlockProperties, BlockState, CHUNK_HEIGHT, CHUNK_SIZE, Chunk,
+};
 
 #[derive(Debug, Clone)]
 pub struct TreeDefinition {
@@ -242,7 +244,13 @@ fn place_tree(
                     continue;
                 }
                 chunk
-                    .set_block(position, tree.leaves)
+                    .set_block_state(
+                        position,
+                        BlockState::with_properties(
+                            tree.leaves,
+                            BlockProperties::Leaves { persistent: false },
+                        ),
+                    )
                     .expect("tree leaf positions stay inside chunk bounds");
             }
         }

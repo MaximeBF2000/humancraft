@@ -234,6 +234,7 @@ impl RenderState {
             content.blocks,
             content.items,
             content.recipes,
+            content.smelting_recipes,
             content.block_ids,
             pipeline,
             generation_context,
@@ -252,6 +253,10 @@ impl RenderState {
             usize::MAX,
             &self.save_store,
         );
+        match self.save_store.load_block_entities(&metadata.id) {
+            Ok(block_entities) => world.load_saved_block_entities(block_entities),
+            Err(error) => self.report_save_error(error),
+        }
         let spawn_eye = if metadata.player.eye_y == 0.0 {
             world.safe_spawn_eye_position(Vec3::new(0.0, 0.0, 20.0))
         } else {
@@ -278,6 +283,8 @@ impl RenderState {
         self.inventory_cursor = None;
         self.inventory_drag = None;
         self.crafting_table_open = false;
+        self.open_container = None;
+        self.block_entity_tick_accumulator = 0.0;
         self.inventory_crafting_grid = Inventory::new(4, 0);
         self.crafting_table_grid = Inventory::new(9, 0);
         self.crafting_result = None;
@@ -313,6 +320,7 @@ impl RenderState {
     pub(super) fn flush_active_world_to_disk(&mut self) {
         self.stow_inventory_cursor();
         self.stow_active_crafting_grid();
+        self.open_container = None;
         let Some(metadata) = self.active_world.as_mut() else {
             return;
         };
@@ -336,6 +344,12 @@ impl RenderState {
                     }
                 }
             }
+            if let Err(error) = self
+                .save_store
+                .save_block_entities(&world_id, &world.block_entities_to_save())
+            {
+                self.report_save_error(error);
+            }
         }
 
         self.dirty_save_chunks.clear();
@@ -357,6 +371,8 @@ impl RenderState {
         self.inventory_cursor = None;
         self.inventory_drag = None;
         self.crafting_table_open = false;
+        self.open_container = None;
+        self.block_entity_tick_accumulator = 0.0;
         self.inventory_crafting_grid = Inventory::new(4, 0);
         self.crafting_table_grid = Inventory::new(9, 0);
         self.crafting_result = None;

@@ -22,9 +22,11 @@ use crate::engine::world::save::{
 };
 use crate::engine::world::{
     ChunkPosition, Inventory, ItemStack, consume_crafting_ingredients, crafting_result,
+    smelting_result,
 };
 
 mod app_input;
+mod block_behaviors;
 mod block_break_overlay;
 mod camera;
 mod client_world;
@@ -49,7 +51,7 @@ mod world_render;
 
 use block_break_overlay::build_block_break_overlay_mesh;
 use camera::Camera;
-use client_world::ClientWorld;
+use client_world::{BlockEntity, ClientWorld};
 use constants::*;
 use hud::{build_crosshair_mesh, build_outline_vertices};
 use input::InputState;
@@ -61,9 +63,9 @@ use inventory_interaction::{
     take_from_slot,
 };
 use inventory_ui::{
-    CraftingUiKind, build_gameplay_ui_mesh, build_inventory_icon_mesh,
-    build_inventory_tooltip_mesh, build_loot_mesh, crafting_input_slot_at_point,
-    crafting_result_slot_at_point, inventory_slot_at_point,
+    CraftingUiKind, FurnaceUiState, build_gameplay_ui_mesh, build_inventory_icon_mesh,
+    build_inventory_tooltip_mesh, build_loot_mesh, container_slot_at_point,
+    crafting_input_slot_at_point, crafting_result_slot_at_point, inventory_slot_at_point,
 };
 #[cfg(test)]
 use inventory_ui::{
@@ -82,7 +84,7 @@ use texture::{Texture, TextureAtlas};
 #[cfg(test)]
 use texture::{
     block_texture_keys, destroy_stage_texture_key, load_texture_pixels, player_hand_texture_key,
-    texture_key_for_direction, texture_path,
+    texture_key_for_direction, texture_key_for_state_direction, texture_path,
 };
 use ui::{
     UI_CONFIG_BACK, UI_CONFIG_CREATE, UI_CONFIG_NAME_FIELD, UI_CONFIG_SEED_FIELD, UI_MAIN_PLAY,
@@ -243,6 +245,7 @@ struct RenderState {
     paused: bool,
     inventory_open: bool,
     crafting_table_open: bool,
+    open_container: Option<WorldBlockPosition>,
     inventory_crafting_grid: Inventory,
     crafting_table_grid: Inventory,
     crafting_result: Option<ItemStack>,
@@ -253,6 +256,7 @@ struct RenderState {
     modifier_control: bool,
     held_block_interaction: HeldBlockInteraction,
     selected_hotbar_slot: usize,
+    block_entity_tick_accumulator: f32,
     last_frame: Instant,
 }
 
@@ -687,6 +691,7 @@ impl RenderState {
             paused: true,
             inventory_open: false,
             crafting_table_open: false,
+            open_container: None,
             inventory_crafting_grid: Inventory::new(4, 0),
             crafting_table_grid: Inventory::new(9, 0),
             crafting_result: None,
@@ -697,6 +702,7 @@ impl RenderState {
             modifier_control: false,
             held_block_interaction: HeldBlockInteraction::default(),
             selected_hotbar_slot: 0,
+            block_entity_tick_accumulator: 0.0,
             last_frame: Instant::now(),
         }
         .with_updated_title()
@@ -787,5 +793,7 @@ fn current_save_time() -> u64 {
         .unwrap_or(0)
 }
 
+#[cfg(test)]
+mod block_behavior_tests;
 #[cfg(test)]
 mod tests;

@@ -118,7 +118,8 @@ pub(super) fn build_render_mesh(
             }
 
             let base = vertices.len() as u32;
-            let (color, texture_key) = render_material(quad.block, quad.direction, blocks);
+            let (color, texture_key) =
+                render_material(quad.block, quad.state, quad.direction, blocks);
             let tex_coords = texture_atlas.tile(&texture_key).uv_quad();
             for (index, vertex) in quad.vertices.into_iter().enumerate() {
                 vertices.push(Vertex {

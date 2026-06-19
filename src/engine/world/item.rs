@@ -37,6 +37,7 @@ pub struct ItemDefinition {
     pub texture: String,
     pub tags: Vec<String>,
     pub tool: Option<ToolDefinition>,
+    pub fuel_ticks: Option<u32>,
 }
 
 impl ItemDefinition {
@@ -49,6 +50,7 @@ impl ItemDefinition {
             texture: "humancraft:missing".to_string(),
             tags: Vec::new(),
             tool: None,
+            fuel_ticks: None,
         }
     }
 
@@ -74,6 +76,11 @@ impl ItemDefinition {
 
     pub fn tool(mut self, tool: ToolDefinition) -> Self {
         self.tool = Some(tool);
+        self
+    }
+
+    pub fn fuel_ticks(mut self, ticks: u32) -> Self {
+        self.fuel_ticks = Some(ticks);
         self
     }
 }
@@ -141,14 +148,36 @@ impl ToolMaterial {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum ItemStackMetadata {
+    ChestInventory(u64),
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct ItemStack {
     pub item: ItemId,
     pub count: u16,
+    pub metadata: Option<ItemStackMetadata>,
 }
 
 impl ItemStack {
     pub fn new(item: ItemId, count: u16) -> Self {
-        Self { item, count }
+        Self {
+            item,
+            count,
+            metadata: None,
+        }
+    }
+
+    pub fn with_metadata(item: ItemId, count: u16, metadata: ItemStackMetadata) -> Self {
+        Self {
+            item,
+            count,
+            metadata: Some(metadata),
+        }
+    }
+
+    pub fn with_count(self, count: u16) -> Self {
+        Self { count, ..self }
     }
 
     pub fn is_empty(self) -> bool {
@@ -219,7 +248,10 @@ impl Inventory {
             let Some(existing) = slot else {
                 continue;
             };
-            if existing.item != stack.item || existing.count >= max_stack_size {
+            if existing.item != stack.item
+                || existing.metadata != stack.metadata
+                || existing.count >= max_stack_size
+            {
                 continue;
             }
 
@@ -237,7 +269,7 @@ impl Inventory {
                 continue;
             }
             let moved = stack.count.min(max_stack_size);
-            *slot = Some(ItemStack::new(stack.item, moved));
+            *slot = Some(stack.with_count(moved));
             stack.count -= moved;
             if stack.count == 0 {
                 return None;

@@ -1,7 +1,10 @@
 //! HumanCraft block registration.
 
 use crate::engine::registry::RegistryError;
-use crate::engine::world::{BlockDefinition, BlockId, BlockRegistry, BlockTextures, ToolKind};
+use crate::engine::world::{
+    BlockBehavior, BlockDefinition, BlockId, BlockRegistry, BlockShape, BlockTextures, ChanceDrop,
+    GrassSpreadBehavior, LeafDecayBehavior, PlacementRuleKind, SaplingGrowthBehavior, ToolKind,
+};
 
 #[derive(Debug, Copy, Clone)]
 pub struct BlockIds {
@@ -16,11 +19,17 @@ pub struct BlockIds {
     pub diamond_ore: BlockId,
     pub oak_log: BlockId,
     pub oak_leaves: BlockId,
+    pub oak_sapling: BlockId,
     pub oak_planks: BlockId,
     pub crafting_table: BlockId,
     pub sand: BlockId,
     pub sandstone: BlockId,
     pub bedrock: BlockId,
+    pub glass: BlockId,
+    pub chest: BlockId,
+    pub furnace: BlockId,
+    pub wooden_stairs: BlockId,
+    pub wooden_slab: BlockId,
 }
 
 pub fn register_blocks(blocks: &mut BlockRegistry) -> Result<BlockIds, RegistryError> {
@@ -29,6 +38,7 @@ pub fn register_blocks(blocks: &mut BlockRegistry) -> Result<BlockIds, RegistryE
             .hardness(0.0)
             .transparent(true)
             .solid(false)
+            .shape(BlockShape::Empty)
             .tags(["replaceable"]),
     )?;
     let grass = blocks.register(
@@ -37,6 +47,16 @@ pub fn register_blocks(blocks: &mut BlockRegistry) -> Result<BlockIds, RegistryE
             .drops(["humancraft:dirt"])
             .effective_tool(ToolKind::Shovel)
             .tags(["terrain", "soil"])
+            .behavior(BlockBehavior {
+                grass_spread: Some(GrassSpreadBehavior {
+                    target_block_key: "humancraft:dirt".to_string(),
+                    attempts_per_random_tick: 4,
+                    horizontal_range: 1,
+                    down_range: 3,
+                    up_range: 1,
+                }),
+                ..BlockBehavior::default()
+            })
             .textures(BlockTextures::top_bottom_sides(
                 "humancraft:block/grass/top",
                 "humancraft:block/dirt/bottom",
@@ -81,7 +101,7 @@ pub fn register_blocks(blocks: &mut BlockRegistry) -> Result<BlockIds, RegistryE
     let iron_ore = blocks.register(
         BlockDefinition::new("humancraft:iron_ore", "Iron Ore")
             .hardness(3.0)
-            .drops(["humancraft:iron_ingot"])
+            .drops(["humancraft:raw_iron"])
             .effective_tool(ToolKind::Pickaxe)
             .harvest_requirement(ToolKind::Pickaxe, 2)
             .tags(["ore", "stone"])
@@ -110,6 +130,7 @@ pub fn register_blocks(blocks: &mut BlockRegistry) -> Result<BlockIds, RegistryE
             .hardness(2.0)
             .drops(["humancraft:oak_log"])
             .effective_tool(ToolKind::Axe)
+            .placement(PlacementRuleKind::AxisFromClickedFace)
             .tags(["wood", "tree_trunk"])
             .textures(BlockTextures::top_bottom_sides(
                 "humancraft:block/oak_log/top",
@@ -121,9 +142,45 @@ pub fn register_blocks(blocks: &mut BlockRegistry) -> Result<BlockIds, RegistryE
         BlockDefinition::new("humancraft:oak_leaves", "Oak Leaves")
             .hardness(0.2)
             .transparent(true)
-            .drops(["humancraft:oak_sapling"])
+            .drops(std::iter::empty::<&str>())
+            .placement(PlacementRuleKind::PersistentLeaves)
             .tags(["leaves", "foliage", "tree_canopy"])
+            .behavior(BlockBehavior {
+                leaf_decay: Some(LeafDecayBehavior {
+                    log_tag: "tree_trunk".to_string(),
+                    max_distance: 6,
+                    sapling_drop: ChanceDrop {
+                        item_key: "humancraft:oak_sapling".to_string(),
+                        chance: 0.15,
+                    },
+                }),
+                ..BlockBehavior::default()
+            })
             .textures(BlockTextures::all("humancraft:block/oak_leaves/top")),
+    )?;
+    let oak_sapling = blocks.register(
+        BlockDefinition::new("humancraft:oak_sapling", "Oak Sapling")
+            .hardness(0.0)
+            .transparent(true)
+            .solid(false)
+            .drops(["humancraft:oak_sapling"])
+            .placement(PlacementRuleKind::Sapling)
+            .shape(BlockShape::Cross)
+            .tags(["plant", "sapling", "replaceable"])
+            .behavior(BlockBehavior {
+                sapling_growth: Some(SaplingGrowthBehavior {
+                    grow_on_tags: vec!["soil".to_string()],
+                    trunk_block_key: "humancraft:oak_log".to_string(),
+                    leaves_block_key: "humancraft:oak_leaves".to_string(),
+                    min_trunk_height: 4,
+                    max_trunk_height: 5,
+                    canopy_radius: 2,
+                    required_light: 9,
+                    required_clearance: 5,
+                }),
+                ..BlockBehavior::default()
+            })
+            .textures(BlockTextures::all("humancraft:block/oak_sapling/top")),
     )?;
     let oak_planks = blocks.register(
         BlockDefinition::new("humancraft:oak_planks", "Oak Planks")
@@ -154,6 +211,10 @@ pub fn register_blocks(blocks: &mut BlockRegistry) -> Result<BlockIds, RegistryE
             .drops(["humancraft:sand"])
             .effective_tool(ToolKind::Shovel)
             .tags(["terrain", "sand"])
+            .behavior(BlockBehavior {
+                gravity: true,
+                ..BlockBehavior::default()
+            })
             .textures(BlockTextures::all("humancraft:block/sand/top")),
     )?;
     let sandstone = blocks.register(
@@ -176,6 +237,67 @@ pub fn register_blocks(blocks: &mut BlockRegistry) -> Result<BlockIds, RegistryE
             .tags(["terrain", "stone", "unbreakable"])
             .textures(BlockTextures::all("humancraft:block/bedrock/top")),
     )?;
+    let glass = blocks.register(
+        BlockDefinition::new("humancraft:glass", "Glass")
+            .hardness(0.3)
+            .transparent(true)
+            .drops(["humancraft:glass"])
+            .tags(["glass"])
+            .textures(BlockTextures::all("humancraft:block/glass/top")),
+    )?;
+    let chest = blocks.register(
+        BlockDefinition::new("humancraft:chest", "Chest")
+            .hardness(2.5)
+            .drops(["humancraft:chest"])
+            .effective_tool(ToolKind::Axe)
+            .placement(PlacementRuleKind::FacePlayerHorizontal)
+            .tags(["wood", "utility", "container", "chest"])
+            .textures(BlockTextures {
+                top: "humancraft:block/chest/top".to_string(),
+                bottom: "humancraft:block/chest/bottom".to_string(),
+                north: "humancraft:block/chest/front".to_string(),
+                south: "humancraft:block/chest/back".to_string(),
+                east: "humancraft:block/chest/right".to_string(),
+                west: "humancraft:block/chest/left".to_string(),
+            }),
+    )?;
+    let furnace = blocks.register(
+        BlockDefinition::new("humancraft:furnace", "Furnace")
+            .hardness(3.5)
+            .drops(["humancraft:furnace"])
+            .effective_tool(ToolKind::Pickaxe)
+            .harvest_requirement(ToolKind::Pickaxe, 1)
+            .placement(PlacementRuleKind::FacePlayerHorizontal)
+            .tags(["stone", "utility", "container", "furnace"])
+            .textures(BlockTextures {
+                top: "humancraft:block/furnace/top".to_string(),
+                bottom: "humancraft:block/furnace/top".to_string(),
+                north: "humancraft:block/furnace/front".to_string(),
+                south: "humancraft:block/furnace/side".to_string(),
+                east: "humancraft:block/furnace/side".to_string(),
+                west: "humancraft:block/furnace/side".to_string(),
+            }),
+    )?;
+    let wooden_stairs = blocks.register(
+        BlockDefinition::new("humancraft:wooden_stairs", "Wooden Stairs")
+            .hardness(2.0)
+            .drops(["humancraft:wooden_stairs"])
+            .effective_tool(ToolKind::Axe)
+            .placement(PlacementRuleKind::Stairs)
+            .shape(BlockShape::Stairs)
+            .tags(["wood", "stairs"])
+            .textures(BlockTextures::all("humancraft:block/oak_planks/top")),
+    )?;
+    let wooden_slab = blocks.register(
+        BlockDefinition::new("humancraft:wooden_slab", "Wooden Slab")
+            .hardness(2.0)
+            .drops(["humancraft:wooden_slab"])
+            .effective_tool(ToolKind::Axe)
+            .placement(PlacementRuleKind::Slab)
+            .shape(BlockShape::Slab)
+            .tags(["wood", "slab"])
+            .textures(BlockTextures::all("humancraft:block/oak_planks/top")),
+    )?;
 
     Ok(BlockIds {
         air,
@@ -189,10 +311,16 @@ pub fn register_blocks(blocks: &mut BlockRegistry) -> Result<BlockIds, RegistryE
         diamond_ore,
         oak_log,
         oak_leaves,
+        oak_sapling,
         oak_planks,
         crafting_table,
         sand,
         sandstone,
         bedrock,
+        glass,
+        chest,
+        furnace,
+        wooden_stairs,
+        wooden_slab,
     })
 }

@@ -1,9 +1,145 @@
 # HumanCraft Progress
 
-Last updated: 2026-06-17
+Last updated: 2026-06-19
 
 ## Done
 
+- Changed oak leaves to use a 15% sapling chance and applied that chance to
+  both decay and normal leaf breaking.
+- Fixed burning furnaces with plain or older block states so ticking repairs
+  them to `Furnace { lit: true }`, allowing the lit front texture to render.
+- Changed sand gravity from one-block-per-tick movement to a cell-based
+  approximation of vanilla falling block motion using `0.04` blocks/tick
+  acceleration and `0.98` drag.
+- Fixed raycasting and breaking for non-solid cross-shaped saplings. Saplings
+  now target under the crosshair and break immediately by hand.
+- Fixed the block behavior performance regression caused by gravity scanning
+  every block in every loaded chunk on every 20 Hz gameplay tick.
+- Changed gravity to an update-driven pending check set:
+  - block edits enqueue the edited cell and the cell above it
+  - gravity ticks only drain queued positions
+  - falling blocks enqueue their next position as they move
+- Added regression coverage that removing a support block schedules sand above
+  it to fall without requiring a loaded-world scan.
+- Added reusable block behavior metadata for gravity, leaf decay, grass spread,
+  and sapling growth.
+- Added a windowed-client block behavior tick module that consumes behavior
+  metadata instead of branching on concrete block keys.
+- Added leaf and sapling block-state properties and persisted them in chunk
+  saves:
+  - generated leaves use `persistent: false` and can decay
+  - player-placed leaves use `persistent: true` and do not decay
+  - saplings store their growth stage
+- Changed tree generation to write generated oak leaves as decayable leaf
+  states.
+- Changed oak leaf drops from a guaranteed sapling drop to a 5% chance when
+  leaves decay, matching the documented non-jungle Minecraft sapling chance.
+- Added oak sapling as a placeable cross-shaped block using the default
+  resource-pack sapling texture.
+- Added oak sapling growth into oak trees when soil and clearance rules pass.
+- Added grass spreading from grass blocks to nearby clear dirt blocks.
+- Added sand gravity through the generic falling-block behavior.
+- Split block behavior regressions into `src/app/windowed/block_behavior_tests.rs`.
+- Split block-state property save encoding into
+  `src/engine/world/save/block_properties.rs`.
+- Added developer documentation for reusable block behaviors and updated player,
+  architecture, chunk, world-save, and windowed-client docs.
+- Verified with `cargo test`:
+  - 138 tests passed
+  - focused coverage for generated leaf decay, player-placed leaf persistence,
+    connected leaves, grass spread, sapling growth, sapling cross rendering,
+    and sand falling
+- Added block states to chunk storage while preserving id-only access for
+  existing systems.
+- Added reusable placement metadata and rules for simple blocks, horizontal
+  player-facing blocks, wooden slabs, and wooden stairs.
+- Added reusable block shape metadata and AABB generation for empty, full cube,
+  slab, and stair shapes.
+- Updated chunk meshing and player collision to use block-state AABBs, so
+  wooden slabs and wooden stairs render and collide as partial blocks.
+- Added state-aware texture lookup for horizontally facing full-block utility
+  blocks.
+- Added HumanCraft content:
+  - glass
+  - chest
+  - furnace
+  - wooden stairs
+  - wooden slabs
+- Added static full-block chest rendering metadata. Chests face the player when
+  placed and chest items are non-stackable.
+- Added static full-block furnace rendering metadata. Furnaces face the player
+  when placed and carry a lit/unlit state in block properties.
+- Added runtime chest and furnace block entity storage. Chests have 27 slots;
+  furnaces have input, fuel, and output slots plus burn/cook timers.
+- Added generic smelting recipe definitions and registered sand-to-glass and
+  raw-iron-to-iron-ingot recipes.
+- Changed iron ore to drop raw iron now that furnace smelting content exists.
+- Added item fuel metadata and configured coal, oak planks, sticks, oak logs,
+  wooden stairs, and wooden slabs as fuels.
+- Added new block and item textures for glass, chest, furnace, wooden stairs,
+  and wooden slabs.
+- Added regression coverage for new content registration, fuels, smelting
+  recipes, horizontal-facing placement, wooden slab side placement/merge, and
+  wooden stair facing/half placement.
+- Added crafting recipes and regression coverage for chests, furnaces, wooden
+  stairs, and wooden slabs so the new blocks are reachable in survival
+  playtests.
+- Added basic chest and furnace container opening from right-click. Holding
+  Shift while right-clicking crafting tables, chests, or furnaces now bypasses
+  UI opening so blocks can be placed against them.
+- Fixed chest and furnace container interaction so left/right click,
+  shift-click, drag placement, double-click collection, and drop shortcuts work
+  across the open container and player inventory. Furnace output remains
+  take-only, and player shift-click routes fuels and smeltables to the proper
+  furnace slot.
+- Changed the furnace container layout to use the vanilla furnace input, fuel,
+  and output slot positions, with placeholder flame and arrow indicators.
+- Corrected wooden stair placement to rise in the player's look direction.
+- Added oak log axis placement from clicked face and state-aware log cap
+  texture selection.
+- Replaced furnace block textures with the default resource-pack furnace
+  textures and derived full-block chest faces from the default chest entity
+  texture.
+- Replaced the glass block and item texture with the default resource-pack
+  transparent glass texture.
+- Added furnace visual feedback: the block front switches to the lit furnace
+  face while burning, and the furnace UI now draws fuel flame and cook-progress
+  indicators from runtime furnace timers.
+- Regenerated chest block and item textures from the default chest entity
+  texture using nonblank full-block front, side, top, and bottom faces.
+- Changed chest breaking to preserve the chest inventory inside the dropped
+  non-stackable chest item during the current session. Placing that chest item
+  restores the saved contents to the new chest block.
+- Removed per-block heap allocation from state-derived AABB lookups used by
+  chunk meshing and player collision, and moved furnace ticking onto the fixed
+  20 Hz gameplay tick accumulator instead of running it every rendered frame.
+- Changed slab and stair hand/inventory/loot rendering to use distinct item
+  sprites instead of forced full-cube oak plank rendering.
+- Added stateful `HCCNK003` chunk persistence for block properties so placed
+  stair, slab, log, chest, and furnace orientation survives save/load while
+  existing `HCCNK002` block-key chunks remain readable.
+- Added regression coverage for block-state chunk save/load round-tripping.
+- Added durable placed chest and furnace block-entity persistence in
+  `block_entities.txt`, including chest/furnace inventories and furnace
+  burn/cook timers.
+- Kept furnace smelting recipes aligned with vanilla timing: 200 game ticks,
+  or 10 seconds at 20 TPS, per item.
+- Reworked the furnace UI cook arrow so it visibly fills from the runtime
+  cook-progress ratio.
+- Fixed furnace ticking while container UIs are open so smelting continues at
+  the intended 20 Hz rate while players watch the furnace.
+- Fixed east/west horizontal texture rotation so a lit furnace uses
+  `front_on.png` on the actual player-facing front face.
+- Brightened the furnace cook arrow fill to near-white for clearer progress
+  feedback.
+- Regenerated opaque six-face chest block textures and updated chest texture
+  metadata to use distinct front, back, left, and right faces.
+- Verified furnace lit-front rendering uses the default resource-pack
+  `furnace_front_on.png` texture.
+- Added developer documentation for block placement and shapes, and updated
+  player, architecture, inventory, meshing, and windowed-client docs.
+- Known follow-up: durable save persistence for chest-item inventory metadata
+  carried in the player inventory or dropped loot.
 - Added persistent shortcut settings storage under `saves/settings.txt`.
 - Loaded shortcut bindings from the settings file at windowed-client startup
   and saved bindings immediately after a shortcut is rebound.

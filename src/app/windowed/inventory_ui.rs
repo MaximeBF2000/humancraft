@@ -1,6 +1,6 @@
 use glam::Vec3;
 
-use crate::engine::world::{Inventory, ItemDefinition, ItemStack, LootEntity};
+use crate::engine::world::{BlockShape, Inventory, ItemDefinition, ItemStack, LootEntity};
 
 use super::camera::Camera;
 use super::client_world::ClientWorld;
@@ -16,6 +16,12 @@ pub(super) enum CraftingUiKind {
     Table,
 }
 
+#[derive(Debug, Copy, Clone, Default)]
+pub(super) struct FurnaceUiState {
+    pub(super) burn_ratio: f32,
+    pub(super) cook_ratio: f32,
+}
+
 const GUI_SOURCE_WIDTH: f32 = 176.0;
 const GUI_SOURCE_HEIGHT: f32 = 166.0;
 const GUI_PANEL_HEIGHT: f32 = 1.24;
@@ -29,6 +35,8 @@ pub(super) fn build_gameplay_ui_mesh(
     crafting_kind: CraftingUiKind,
     crafting_grid: &Inventory,
     crafting_result: Option<ItemStack>,
+    container_inventory: Option<&Inventory>,
+    furnace_state: Option<FurnaceUiState>,
     aspect: f32,
     selected_hotbar_slot: usize,
     cursor_stack: Option<ItemStack>,
@@ -37,19 +45,34 @@ pub(super) fn build_gameplay_ui_mesh(
 ) -> (Vec<Vertex>, Vec<u32>) {
     let mut ui = UiMeshBuilder::default();
     if inventory_open {
-        draw_inventory_panel(&mut ui, crafting_kind, aspect);
-        for index in 0..crafting_grid.slot_count() {
-            let rect = crafting_input_slot_rect(index, crafting_kind, aspect);
-            draw_inventory_slot(&mut ui, rect, false, rect.contains(cursor_point));
-        }
-        let result_rect = crafting_result_slot_rect(crafting_kind, aspect);
-        draw_inventory_slot(
+        draw_inventory_panel(
             &mut ui,
-            result_rect,
-            crafting_result.is_some(),
-            result_rect.contains(cursor_point),
+            crafting_kind,
+            container_inventory.is_none(),
+            aspect,
         );
-        draw_crafting_arrow(&mut ui, crafting_kind, aspect);
+        if let Some(container_inventory) = container_inventory {
+            if container_inventory.slot_count() == 3 {
+                draw_furnace_indicators(&mut ui, furnace_state.unwrap_or_default(), aspect);
+            }
+            for index in 0..container_inventory.slot_count() {
+                let rect = container_slot_rect(index, container_inventory.slot_count(), aspect);
+                draw_inventory_slot(&mut ui, rect, false, rect.contains(cursor_point));
+            }
+        } else {
+            for index in 0..crafting_grid.slot_count() {
+                let rect = crafting_input_slot_rect(index, crafting_kind, aspect);
+                draw_inventory_slot(&mut ui, rect, false, rect.contains(cursor_point));
+            }
+            let result_rect = crafting_result_slot_rect(crafting_kind, aspect);
+            draw_inventory_slot(
+                &mut ui,
+                result_rect,
+                crafting_result.is_some(),
+                result_rect.contains(cursor_point),
+            );
+            draw_crafting_arrow(&mut ui, crafting_kind, aspect);
+        }
         for index in 0..world.player_inventory.slots().len() {
             let rect = inventory_slot_rect(index, true, aspect);
             draw_inventory_slot(
@@ -80,22 +103,34 @@ pub(super) fn build_gameplay_ui_mesh(
     }
 
     if inventory_open {
-        for (index, stack) in crafting_grid.slots().iter().enumerate() {
-            let Some(stack) = stack else {
-                continue;
-            };
-            let rect = crafting_input_slot_rect(index, crafting_kind, aspect);
-            if stack.count > 1 {
-                draw_stack_count(&mut ui, rect, stack.count);
+        if let Some(container_inventory) = container_inventory {
+            for (index, stack) in container_inventory.slots().iter().enumerate() {
+                let Some(stack) = stack else {
+                    continue;
+                };
+                let rect = container_slot_rect(index, container_inventory.slot_count(), aspect);
+                if stack.count > 1 {
+                    draw_stack_count(&mut ui, rect, stack.count);
+                }
             }
-        }
-        if let Some(stack) = crafting_result {
-            if stack.count > 1 {
-                draw_stack_count(
-                    &mut ui,
-                    crafting_result_slot_rect(crafting_kind, aspect),
-                    stack.count,
-                );
+        } else {
+            for (index, stack) in crafting_grid.slots().iter().enumerate() {
+                let Some(stack) = stack else {
+                    continue;
+                };
+                let rect = crafting_input_slot_rect(index, crafting_kind, aspect);
+                if stack.count > 1 {
+                    draw_stack_count(&mut ui, rect, stack.count);
+                }
+            }
+            if let Some(stack) = crafting_result {
+                if stack.count > 1 {
+                    draw_stack_count(
+                        &mut ui,
+                        crafting_result_slot_rect(crafting_kind, aspect),
+                        stack.count,
+                    );
+                }
             }
         }
         if let Some(stack) = cursor_stack {
@@ -137,6 +172,7 @@ pub(super) fn build_inventory_icon_mesh(
     crafting_kind: CraftingUiKind,
     crafting_grid: &Inventory,
     crafting_result: Option<ItemStack>,
+    container_inventory: Option<&Inventory>,
     aspect: f32,
     selected_hotbar_slot: usize,
     cursor_stack: Option<ItemStack>,
@@ -180,32 +216,55 @@ pub(super) fn build_inventory_icon_mesh(
         }
     }
     if inventory_open {
-        for (index, stack) in crafting_grid.slots().iter().enumerate() {
-            let Some(stack) = stack else {
-                continue;
-            };
-            let Some(definition) = world.items.get(stack.item) else {
-                continue;
-            };
-            push_item_icon_mesh(
-                world,
-                texture_atlas,
-                &mut vertices,
-                &mut indices,
-                definition,
-                inventory_icon_rect(crafting_input_slot_rect(index, crafting_kind, aspect)),
-            );
-        }
-        if let Some(stack) = crafting_result {
-            if let Some(definition) = world.items.get(stack.item) {
+        if let Some(container_inventory) = container_inventory {
+            for (index, stack) in container_inventory.slots().iter().enumerate() {
+                let Some(stack) = stack else {
+                    continue;
+                };
+                let Some(definition) = world.items.get(stack.item) else {
+                    continue;
+                };
                 push_item_icon_mesh(
                     world,
                     texture_atlas,
                     &mut vertices,
                     &mut indices,
                     definition,
-                    inventory_icon_rect(crafting_result_slot_rect(crafting_kind, aspect)),
+                    inventory_icon_rect(container_slot_rect(
+                        index,
+                        container_inventory.slot_count(),
+                        aspect,
+                    )),
                 );
+            }
+        } else {
+            for (index, stack) in crafting_grid.slots().iter().enumerate() {
+                let Some(stack) = stack else {
+                    continue;
+                };
+                let Some(definition) = world.items.get(stack.item) else {
+                    continue;
+                };
+                push_item_icon_mesh(
+                    world,
+                    texture_atlas,
+                    &mut vertices,
+                    &mut indices,
+                    definition,
+                    inventory_icon_rect(crafting_input_slot_rect(index, crafting_kind, aspect)),
+                );
+            }
+            if let Some(stack) = crafting_result {
+                if let Some(definition) = world.items.get(stack.item) {
+                    push_item_icon_mesh(
+                        world,
+                        texture_atlas,
+                        &mut vertices,
+                        &mut indices,
+                        definition,
+                        inventory_icon_rect(crafting_result_slot_rect(crafting_kind, aspect)),
+                    );
+                }
             }
         }
         if let Some(stack) = cursor_stack {
@@ -240,6 +299,7 @@ pub(super) fn build_loot_mesh(
             .as_ref()
             .and_then(|key| world.blocks.get_by_key(key))
             .map(|(_, block)| block)
+            .filter(|block| block.shape == BlockShape::FullCube)
         {
             push_loot_block_mesh(&mut vertices, &mut indices, texture_atlas, block, loot);
             continue;
@@ -435,7 +495,12 @@ fn aspect_for_rect(rect: UiRect) -> f32 {
     (slot_height(rect) / slot_width(rect)).max(0.1)
 }
 
-fn draw_inventory_panel(ui: &mut UiMeshBuilder, kind: CraftingUiKind, aspect: f32) {
+fn draw_inventory_panel(
+    ui: &mut UiMeshBuilder,
+    kind: CraftingUiKind,
+    show_inventory_decoration: bool,
+    aspect: f32,
+) {
     let panel = inventory_panel_rect(aspect);
     ui.rect(panel, [0.03, 0.03, 0.03]);
     ui.rect(
@@ -451,7 +516,7 @@ fn draw_inventory_panel(ui: &mut UiMeshBuilder, kind: CraftingUiKind, aspect: f3
         [0.76, 0.76, 0.76],
     );
 
-    if kind == CraftingUiKind::Inventory {
+    if kind == CraftingUiKind::Inventory && show_inventory_decoration {
         ui.rect(gui_rect(27.0, 7.0, 51.0, 70.0, aspect), [0.01, 0.01, 0.01]);
         for row in 0..4 {
             draw_inventory_slot(
@@ -490,6 +555,79 @@ fn draw_crafting_arrow(ui: &mut UiMeshBuilder, kind: CraftingUiKind, aspect: f32
     ui.rect(body, [0.55, 0.55, 0.55]);
     ui.rect(top, [0.55, 0.55, 0.55]);
     ui.quad(tip, [0.55, 0.55, 0.55]);
+}
+
+fn draw_furnace_indicators(ui: &mut UiMeshBuilder, state: FurnaceUiState, aspect: f32) {
+    let flame = gui_rect(57.0, 37.0, 14.0, 14.0, aspect);
+    ui.rect(flame, [0.30, 0.30, 0.30]);
+    let flame_fill = (13.0 * state.burn_ratio.clamp(0.0, 1.0)).ceil();
+    if flame_fill > 0.0 {
+        ui.rect(
+            gui_rect(58.0, 50.0 - flame_fill, 12.0, flame_fill, aspect),
+            [0.95, 0.36, 0.08],
+        );
+        ui.rect(
+            gui_rect(
+                61.0,
+                50.0 - flame_fill * 0.75,
+                6.0,
+                flame_fill * 0.65,
+                aspect,
+            ),
+            [1.0, 0.82, 0.14],
+        );
+    }
+
+    let arrow = gui_rect(79.0, 34.0, 24.0, 17.0, aspect);
+    ui.rect(gui_rect(79.0, 38.0, 18.0, 8.0, aspect), [0.42, 0.42, 0.42]);
+    ui.rect(gui_rect(97.0, 35.0, 3.0, 14.0, aspect), [0.42, 0.42, 0.42]);
+    let tip = [
+        [arrow.right, arrow.center_y(), 0.0],
+        [gui_rect(98.0, 34.0, 1.0, 1.0, aspect).left, arrow.top, 0.0],
+        [
+            gui_rect(98.0, 51.0, 1.0, 1.0, aspect).left,
+            arrow.bottom,
+            0.0,
+        ],
+        [
+            gui_rect(98.0, 51.0, 1.0, 1.0, aspect).left,
+            arrow.bottom,
+            0.0,
+        ],
+    ];
+    ui.quad(tip, [0.42, 0.42, 0.42]);
+    let progress = (24.0 * state.cook_ratio.clamp(0.0, 1.0)).ceil();
+    if progress > 0.0 {
+        let fill = [0.96, 0.96, 0.96];
+        ui.rect(gui_rect(79.0, 38.0, progress.min(18.0), 8.0, aspect), fill);
+        if progress > 18.0 {
+            ui.rect(
+                gui_rect(97.0, 35.0, (progress - 18.0).min(3.0), 14.0, aspect),
+                fill,
+            );
+        }
+        if progress > 21.0 {
+            let tip_progress = ((progress - 21.0) / 3.0).clamp(0.0, 1.0);
+            let tip_right = gui_rect(100.0 + 3.0 * tip_progress, 34.0, 1.0, 1.0, aspect).left;
+            ui.quad(
+                [
+                    [tip_right, arrow.center_y(), 0.0],
+                    [gui_rect(100.0, 34.0, 1.0, 1.0, aspect).left, arrow.top, 0.0],
+                    [
+                        gui_rect(100.0, 51.0, 1.0, 1.0, aspect).left,
+                        arrow.bottom,
+                        0.0,
+                    ],
+                    [
+                        gui_rect(100.0, 51.0, 1.0, 1.0, aspect).left,
+                        arrow.bottom,
+                        0.0,
+                    ],
+                ],
+                fill,
+            );
+        }
+    }
 }
 
 fn draw_stack_count(ui: &mut UiMeshBuilder, rect: UiRect, count: u16) {
@@ -620,6 +758,49 @@ pub(super) fn crafting_result_slot_at_point(
     crafting_result_slot_rect(kind, aspect).contains(point)
 }
 
+pub(super) fn container_slot_at_point(
+    point: UiPoint,
+    slot_count: usize,
+    aspect: f32,
+) -> Option<usize> {
+    for index in 0..slot_count {
+        if container_slot_rect(index, slot_count, aspect).contains(point) {
+            return Some(index);
+        }
+    }
+    None
+}
+
+pub(super) fn container_slot_rect(index: usize, slot_count: usize, aspect: f32) -> UiRect {
+    if slot_count == 3 {
+        let (left, top) = match index {
+            0 => (56.0, 17.0),
+            1 => (56.0, 53.0),
+            2 => (116.0, 35.0),
+            _ => (0.0, 0.0),
+        };
+        return gui_rect(left, top, GUI_SLOT_SIZE, GUI_SLOT_SIZE, aspect);
+    }
+    let columns = if slot_count <= 3 {
+        slot_count.max(1)
+    } else {
+        9
+    };
+    let row = index / columns;
+    let column = index % columns;
+    let rows = slot_count.div_ceil(columns);
+    let total_width = columns as f32 * GUI_SLOT_SIZE;
+    let left = (GUI_SOURCE_WIDTH - total_width) * 0.5;
+    let top = if rows <= 1 { 34.0 } else { 18.0 };
+    gui_rect(
+        left + column as f32 * GUI_SLOT_SIZE,
+        top + row as f32 * GUI_SLOT_SIZE,
+        GUI_SLOT_SIZE,
+        GUI_SLOT_SIZE,
+        aspect,
+    )
+}
+
 pub(super) fn crafting_input_slot_rect(index: usize, kind: CraftingUiKind, aspect: f32) -> UiRect {
     let columns = match kind {
         CraftingUiKind::Inventory => 2,
@@ -717,6 +898,7 @@ fn push_held_item_mesh(
         .as_ref()
         .and_then(|key| world.blocks.get_by_key(key))
         .map(|(_, block)| block)
+        .filter(|block| block.shape == BlockShape::FullCube)
     {
         push_held_block_mesh(vertices, indices, texture_atlas, block, aspect);
     } else {
@@ -749,6 +931,7 @@ fn push_item_icon_mesh(
         .as_ref()
         .and_then(|key| world.blocks.get_by_key(key))
         .map(|(_, block)| block)
+        .filter(|block| block.shape == BlockShape::FullCube)
     {
         push_slot_block_icon_mesh(vertices, indices, texture_atlas, block, rect);
     } else {
@@ -768,7 +951,7 @@ fn push_slot_block_icon_mesh(
         vertices,
         indices,
         faces.front,
-        texture_atlas.tile(&block.textures.south),
+        texture_atlas.tile(&block.textures.north),
         [0.90, 0.90, 0.90],
     );
     push_textured_ui_quad(
@@ -831,7 +1014,7 @@ fn push_held_block_mesh(
         vertices,
         indices,
         faces.front,
-        texture_atlas.tile(&block.textures.south),
+        texture_atlas.tile(&block.textures.north),
         [0.95, 0.95, 0.95],
     );
     push_textured_ui_quad(

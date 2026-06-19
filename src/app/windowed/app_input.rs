@@ -350,6 +350,7 @@ impl RenderState {
             self.inventory_drag = None;
             self.last_inventory_click = None;
             self.crafting_table_open = false;
+            self.open_container = None;
             self.crafting_result = None;
             self.held_block_interaction.clear();
             if let Some(world) = self.world.as_mut() {
@@ -385,11 +386,13 @@ impl RenderState {
             self.stow_active_crafting_grid();
             self.inventory_drag = None;
             self.crafting_table_open = false;
+            self.open_container = None;
             self.crafting_result = None;
         }
         self.inventory_open = inventory_open;
         if inventory_open {
             self.crafting_table_open = false;
+            self.open_container = None;
             self.update_crafting_result();
         }
         self.input.clear_movement();
@@ -416,11 +419,39 @@ impl RenderState {
         self.last_inventory_click = None;
         self.inventory_open = true;
         self.crafting_table_open = true;
+        self.open_container = None;
         self.update_crafting_result();
         self.input.clear_movement();
         release_cursor(&self.window);
         self.window
             .set_title("HumanCraft - Crafting Table (E or Esc to close)");
+    }
+
+    pub(super) fn open_container(&mut self, position: WorldBlockPosition) {
+        if self.mode != AppMode::InGame || self.paused {
+            return;
+        }
+        let Some(world) = self.world.as_mut() else {
+            return;
+        };
+        if !world.ensure_block_entity_for_position(position) {
+            return;
+        }
+        self.held_block_interaction.clear();
+        self.stow_inventory_cursor();
+        if self.inventory_open {
+            self.stow_active_crafting_grid();
+        }
+        self.inventory_drag = None;
+        self.last_inventory_click = None;
+        self.inventory_open = true;
+        self.crafting_table_open = false;
+        self.open_container = Some(position);
+        self.crafting_result = None;
+        self.input.clear_movement();
+        release_cursor(&self.window);
+        self.window
+            .set_title("HumanCraft - Container (E or Esc to close)");
     }
 
     pub(super) fn start_inventory_mouse(&mut self, button: MouseButton) {
@@ -429,12 +460,20 @@ impl RenderState {
         };
         let slot = self.inventory_slot_at_cursor();
         if let Some(world) = self.world.as_ref() {
+            let container_inventory = self.open_container.and_then(|position| {
+                match world.block_entities.get(&position) {
+                    Some(BlockEntity::Chest(inventory)) => Some(inventory),
+                    Some(BlockEntity::Furnace(furnace)) => Some(&furnace.inventory),
+                    None => None,
+                }
+            });
             self.inventory_drag = Some(InventoryDrag::new(
                 button,
                 slot,
                 self.inventory_cursor,
                 &world.player_inventory,
                 self.active_crafting_grid(),
+                container_inventory,
             ));
         }
     }
@@ -517,8 +556,12 @@ impl RenderState {
     }
 
     pub(super) fn inventory_slot_at_cursor(&self) -> Option<InventorySlotId> {
-        self.crafting_result_slot_at_cursor()
-            .then_some(InventorySlotId::CraftingResult)
+        self.container_slot_at_cursor()
+            .map(InventorySlotId::Container)
+            .or_else(|| {
+                self.crafting_result_slot_at_cursor()
+                    .then_some(InventorySlotId::CraftingResult)
+            })
             .or_else(|| {
                 self.crafting_input_slot_at_cursor()
                     .map(InventorySlotId::CraftingInput)
@@ -527,6 +570,30 @@ impl RenderState {
                 self.player_inventory_slot_at_cursor()
                     .map(InventorySlotId::Player)
             })
+    }
+
+    pub(super) fn container_slot_at_cursor(&self) -> Option<usize> {
+        if self.mode != AppMode::InGame || !self.inventory_open || self.open_container.is_none() {
+            return None;
+        }
+        let point = cursor_to_ui_point(self.cursor_position, self.size);
+        let aspect = self.config.width.max(1) as f32 / self.config.height.max(1) as f32;
+        container_slot_at_point(point, self.open_container_slot_count(), aspect)
+    }
+
+    fn open_container_slot_count(&self) -> usize {
+        let Some(position) = self.open_container else {
+            return 0;
+        };
+        match self
+            .world
+            .as_ref()
+            .and_then(|world| world.block_entities.get(&position))
+        {
+            Some(BlockEntity::Chest(inventory)) => inventory.slot_count(),
+            Some(BlockEntity::Furnace(furnace)) => furnace.inventory.slot_count(),
+            None => 0,
+        }
     }
 
     pub(super) fn player_inventory_slot_at_cursor(&self) -> Option<usize> {
@@ -539,7 +606,7 @@ impl RenderState {
     }
 
     pub(super) fn crafting_input_slot_at_cursor(&self) -> Option<usize> {
-        if self.mode != AppMode::InGame || !self.inventory_open {
+        if self.mode != AppMode::InGame || !self.inventory_open || self.open_container.is_some() {
             return None;
         }
         let point = cursor_to_ui_point(self.cursor_position, self.size);
@@ -548,7 +615,7 @@ impl RenderState {
     }
 
     pub(super) fn crafting_result_slot_at_cursor(&self) -> bool {
-        if self.mode != AppMode::InGame || !self.inventory_open {
+        if self.mode != AppMode::InGame || !self.inventory_open || self.open_container.is_some() {
             return false;
         }
         let point = cursor_to_ui_point(self.cursor_position, self.size);
@@ -623,6 +690,37 @@ impl RenderState {
             InventorySlotId::CraftingResult => {
                 self.click_crafting_result_slot(button, self.modifier_shift)
             }
+            InventorySlotId::Container(slot) => self.click_container_slot(slot, button),
+        }
+    }
+
+    fn click_container_slot(&mut self, slot: usize, button: InventoryMouseButton) {
+        let Some(position) = self.open_container else {
+            return;
+        };
+        let Some(world) = self.world.as_mut() else {
+            return;
+        };
+        let items = world.items.clone();
+        let Some(entity) = world.block_entities.get_mut(&position) else {
+            return;
+        };
+        let inventory = match entity {
+            BlockEntity::Chest(inventory) => inventory,
+            BlockEntity::Furnace(furnace) => {
+                if slot == 2 && self.inventory_cursor.is_some() {
+                    return;
+                }
+                &mut furnace.inventory
+            }
+        };
+        match button {
+            InventoryMouseButton::Left => {
+                left_click_inventory_slot(inventory, &mut self.inventory_cursor, slot, &items)
+            }
+            InventoryMouseButton::Right => {
+                right_click_inventory_slot(inventory, &mut self.inventory_cursor, slot, &items)
+            }
         }
     }
 
@@ -681,7 +779,9 @@ impl RenderState {
     fn quick_transfer_slot(&mut self, slot: InventorySlotId) {
         match slot {
             InventorySlotId::Player(slot) => {
-                if let Some(world) = self.world.as_mut() {
+                if self.open_container.is_some() {
+                    self.quick_transfer_player_slot_to_container(slot);
+                } else if let Some(world) = self.world.as_mut() {
                     quick_transfer_player_slot(&mut world.player_inventory, slot, &world.items);
                 }
             }
@@ -701,6 +801,29 @@ impl RenderState {
                 self.update_crafting_result();
             }
             InventorySlotId::CraftingResult => self.quick_craft_to_inventory(),
+            InventorySlotId::Container(slot) => {
+                let Some(position) = self.open_container else {
+                    return;
+                };
+                let Some(world) = self.world.as_mut() else {
+                    return;
+                };
+                let items = world.items.clone();
+                let Some(entity) = world.block_entities.get_mut(&position) else {
+                    return;
+                };
+                let inventory = match entity {
+                    BlockEntity::Chest(inventory) => inventory,
+                    BlockEntity::Furnace(furnace) => &mut furnace.inventory,
+                };
+                let Some(stack) = inventory.slot(slot) else {
+                    return;
+                };
+                inventory.set_slot(slot, None);
+                let remainder =
+                    move_stack_into_player_inventory(&mut world.player_inventory, stack, &items);
+                inventory.set_slot(slot, remainder);
+            }
         }
     }
 
@@ -722,6 +845,45 @@ impl RenderState {
         }
     }
 
+    fn quick_transfer_player_slot_to_container(&mut self, slot: usize) {
+        let Some(position) = self.open_container else {
+            return;
+        };
+        let Some(world) = self.world.as_mut() else {
+            return;
+        };
+        let Some(stack) = world.player_inventory.slot(slot) else {
+            return;
+        };
+        let items = world.items.clone();
+        let furnace_target_slot = if items
+            .get(stack.item)
+            .and_then(|item| item.fuel_ticks)
+            .is_some()
+        {
+            Some(1)
+        } else if smelting_result(&world.smelting_recipes, &items, stack.item).is_some() {
+            Some(0)
+        } else {
+            None
+        };
+        let Some(entity) = world.block_entities.get_mut(&position) else {
+            return;
+        };
+
+        let remainder = match entity {
+            BlockEntity::Chest(inventory) => inventory.add_stack(stack, &items),
+            BlockEntity::Furnace(furnace) => {
+                if let Some(target_slot) = furnace_target_slot {
+                    move_stack_into_slot(&mut furnace.inventory, stack, target_slot, &items)
+                } else {
+                    Some(stack)
+                }
+            }
+        };
+        world.player_inventory.set_slot(slot, remainder);
+    }
+
     fn distribute_dragged_slots(&mut self, slots: &[InventorySlotId]) {
         let player_slots: Vec<_> = slots
             .iter()
@@ -734,6 +896,13 @@ impl RenderState {
             .iter()
             .filter_map(|slot| match slot {
                 InventorySlotId::CraftingInput(index) => Some(*index),
+                _ => None,
+            })
+            .collect();
+        let container_slots: Vec<_> = slots
+            .iter()
+            .filter_map(|slot| match slot {
+                InventorySlotId::Container(index) => Some(*index),
                 _ => None,
             })
             .collect();
@@ -759,6 +928,39 @@ impl RenderState {
             );
             self.inventory_cursor = cursor;
             self.update_crafting_result();
+        }
+        if !container_slots.is_empty() {
+            self.distribute_dragged_container_slots(&container_slots);
+        }
+    }
+
+    fn distribute_dragged_container_slots(&mut self, slots: &[usize]) {
+        let Some(position) = self.open_container else {
+            return;
+        };
+        let Some(world) = self.world.as_mut() else {
+            return;
+        };
+        let items = world.items.clone();
+        let Some(entity) = world.block_entities.get_mut(&position) else {
+            return;
+        };
+        match entity {
+            BlockEntity::Chest(inventory) => distribute_carried_stack_evenly(
+                inventory,
+                &mut self.inventory_cursor,
+                slots,
+                &items,
+            ),
+            BlockEntity::Furnace(furnace) => {
+                let slots: Vec<_> = slots.iter().copied().filter(|slot| *slot != 2).collect();
+                distribute_carried_stack_evenly(
+                    &mut furnace.inventory,
+                    &mut self.inventory_cursor,
+                    &slots,
+                    &items,
+                );
+            }
         }
     }
 
@@ -795,6 +997,17 @@ impl RenderState {
         } else {
             self.inventory_crafting_grid = restored_grid;
         }
+        if let Some(position) = self.open_container
+            && !drag.start_container_slots.is_empty()
+            && let Some(world) = self.world.as_mut()
+            && let Some(entity) = world.block_entities.get_mut(&position)
+        {
+            let restored_container = Inventory::from_slots(drag.start_container_slots.clone(), 0);
+            match entity {
+                BlockEntity::Chest(inventory) => *inventory = restored_container,
+                BlockEntity::Furnace(furnace) => furnace.inventory = restored_container,
+            }
+        }
         self.update_crafting_result();
     }
 
@@ -827,6 +1040,34 @@ impl RenderState {
                 placed
             }
             InventorySlotId::CraftingResult => false,
+            InventorySlotId::Container(slot) => {
+                let Some(position) = self.open_container else {
+                    return false;
+                };
+                let Some(world) = self.world.as_mut() else {
+                    return false;
+                };
+                let items = world.items.clone();
+                let Some(entity) = world.block_entities.get_mut(&position) else {
+                    return false;
+                };
+                match entity {
+                    BlockEntity::Chest(inventory) => {
+                        place_one_carried_item(inventory, &mut self.inventory_cursor, slot, &items)
+                    }
+                    BlockEntity::Furnace(furnace) => {
+                        if slot == 2 {
+                            return false;
+                        }
+                        place_one_carried_item(
+                            &mut furnace.inventory,
+                            &mut self.inventory_cursor,
+                            slot,
+                            &items,
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -851,6 +1092,7 @@ impl RenderState {
                 let mut cursor = self.inventory_cursor;
                 collect_matching_stacks(self.active_crafting_grid_mut(), &mut cursor, None, &items);
                 self.inventory_cursor = cursor;
+                self.collect_matching_open_container_stacks(None);
             }
             InventorySlotId::CraftingInput(slot) => {
                 let mut cursor = self.inventory_cursor;
@@ -872,6 +1114,41 @@ impl RenderState {
                 self.update_crafting_result();
             }
             InventorySlotId::CraftingResult => {}
+            InventorySlotId::Container(slot) => {
+                self.collect_matching_open_container_stacks(Some(slot));
+                if let Some(world) = self.world.as_mut() {
+                    collect_matching_stacks(
+                        &mut world.player_inventory,
+                        &mut self.inventory_cursor,
+                        None,
+                        &items,
+                    );
+                }
+            }
+        }
+    }
+
+    fn collect_matching_open_container_stacks(&mut self, hovered_slot: Option<usize>) {
+        let Some(position) = self.open_container else {
+            return;
+        };
+        let Some(world) = self.world.as_mut() else {
+            return;
+        };
+        let items = world.items.clone();
+        let Some(entity) = world.block_entities.get_mut(&position) else {
+            return;
+        };
+        match entity {
+            BlockEntity::Chest(inventory) => {
+                collect_matching_stacks(inventory, &mut self.inventory_cursor, hovered_slot, &items)
+            }
+            BlockEntity::Furnace(furnace) => collect_matching_stacks(
+                &mut furnace.inventory,
+                &mut self.inventory_cursor,
+                hovered_slot,
+                &items,
+            ),
         }
     }
 
@@ -928,6 +1205,7 @@ impl RenderState {
                 self.update_crafting_result();
             }
             InventorySlotId::CraftingResult => {}
+            InventorySlotId::Container(_) => {}
         }
     }
 
@@ -943,6 +1221,22 @@ impl RenderState {
                     let dropped = take_from_slot(self.active_crafting_grid_mut(), slot, full_stack);
                     self.update_crafting_result();
                     dropped
+                }
+                Some(InventorySlotId::Container(slot)) => {
+                    let Some(position) = self.open_container else {
+                        return;
+                    };
+                    self.world.as_mut().and_then(|world| {
+                        let entity = world.block_entities.get_mut(&position)?;
+                        match entity {
+                            BlockEntity::Chest(inventory) => {
+                                take_from_slot(inventory, slot, full_stack)
+                            }
+                            BlockEntity::Furnace(furnace) => {
+                                take_from_slot(&mut furnace.inventory, slot, full_stack)
+                            }
+                        }
+                    })
                 }
                 _ => None,
             }
@@ -988,6 +1282,13 @@ impl RenderState {
             InventorySlotId::Player(slot) => self.world.as_ref()?.player_inventory.slot(slot),
             InventorySlotId::CraftingInput(slot) => self.active_crafting_grid().slot(slot),
             InventorySlotId::CraftingResult => self.crafting_result,
+            InventorySlotId::Container(slot) => {
+                let position = self.open_container?;
+                match self.world.as_ref()?.block_entities.get(&position)? {
+                    BlockEntity::Chest(inventory) => inventory.slot(slot),
+                    BlockEntity::Furnace(furnace) => furnace.inventory.slot(slot),
+                }
+            }
         }
     }
 
@@ -1063,6 +1364,37 @@ fn merge_result_into_cursor(cursor: Option<ItemStack>, result: ItemStack) -> Opt
             Some(stack)
         }
     }
+}
+
+fn move_stack_into_slot(
+    inventory: &mut Inventory,
+    mut stack: ItemStack,
+    slot_index: usize,
+    items: &crate::engine::world::ItemRegistry,
+) -> Option<ItemStack> {
+    let max_stack_size = items
+        .get(stack.item)
+        .map(|definition| definition.max_stack_size)
+        .unwrap_or(64);
+    match inventory.slot(slot_index) {
+        None => {
+            let moved = stack.count.min(max_stack_size);
+            inventory.set_slot(slot_index, Some(stack.with_count(moved)));
+            stack.count -= moved;
+        }
+        Some(mut existing)
+            if existing.item == stack.item
+                && existing.metadata == stack.metadata
+                && existing.count < max_stack_size =>
+        {
+            let moved = stack.count.min(max_stack_size - existing.count);
+            existing.count += moved;
+            stack.count -= moved;
+            inventory.set_slot(slot_index, Some(existing));
+        }
+        _ => {}
+    }
+    (stack.count > 0).then_some(stack)
 }
 
 fn bound_hotbar_key(event: &KeyEvent, bindings: &KeyBindings) -> Option<usize> {

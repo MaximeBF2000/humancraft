@@ -37,8 +37,9 @@ In-game controls:
   when the selected tool meets the harvest requirement. Releasing the button or
   aiming at another block resets the current damage.
 - Right click or hold right click: place the selected hotbar item when it is a
-  placeable block. Right clicking a crafting table opens its crafting UI
-  instead.
+  placeable block. Right clicking a crafting table, chest, or furnace opens
+  its UI instead. Hold `Shift` while right clicking one of those utility blocks
+  to place against it instead of opening it.
 - Left/Right arrows: change the selected hotbar slot
 - `E`: open or close the inventory overlay
 - `Esc`: open the pause overlay. `Keep Playing` resumes. `Save & Quit` flushes
@@ -60,10 +61,16 @@ crafting table grid. The 3 x 3 grid crafts wooden, stone, iron, and diamond
 pickaxes, shovels, and axes with the original Minecraft-style tool shapes:
 pickaxes use three material items over two centered sticks, shovels use one
 material item over two sticks, and axes use three material items around two
-sticks in either left or right orientation. Iron tools currently use iron
-ingots, which iron ore drops directly until furnace smelting exists. Crafting
-inputs are returned to the player inventory when the UI closes, space
-permitting.
+sticks in either left or right orientation. Iron ore now drops raw iron, which
+is smelted into iron ingots by the furnace system. Crafting inputs are returned
+to the player inventory when the UI closes, space permitting.
+
+Additional 3 x 3 crafting recipes:
+
+- Chest: oak planks around the edge with the center empty.
+- Furnace: cobblestone around the edge with the center empty.
+- Wooden stairs: six oak planks in a stair shape, producing four stairs.
+- Wooden slabs: three oak planks in a horizontal row, producing six slabs.
 
 Inventory and crafting overlay controls:
 
@@ -74,14 +81,19 @@ Inventory and crafting overlay controls:
   slot.
 - Shift-left click a player inventory or hotbar stack: quick-transfer it
   between the hotbar and the main inventory, filling matching stacks first.
+- Shift-left click while a chest is open: move stacks between the player
+  inventory and chest storage.
+- Shift-left click while a furnace is open: move fuel into the fuel slot,
+  smeltable items into the input slot, or move furnace contents back to the
+  player inventory.
 - Left click a crafting result: take the result and consume one set of
   ingredients from the crafting grid.
 - Shift-left click a crafting result: craft as many results as possible into
   the player inventory.
 - Left drag with a carried stack: distribute items evenly over compatible
-  player or crafting slots. Slot counts update while dragging.
-- Right drag with a carried stack: place one item in each compatible player or
-  crafting slot.
+  player, crafting, chest, or furnace slots. Slot counts update while dragging.
+- Right drag with a carried stack: place one item in each compatible player,
+  crafting, chest, or furnace slot.
 - Double-left click while carrying a stack: collect matching visible stacks into
   the carried stack up to the item's stack limit.
 - Number keys `1` through `9` while hovering a slot: swap that slot with the
@@ -102,6 +114,42 @@ then to the first empty slot. Stone currently drops cobblestone, and the
 cobblestone stack can be selected and placed as a block. Stone, cobblestone,
 sandstone, coal ore, iron ore, gold ore, and diamond ore require a sufficient
 pickaxe to drop loot. Diamond and gold ore require an iron pickaxe or better.
+
+New placeable utility and shape blocks:
+
+- Chests are full-block, static storage blocks. They face the player when
+  placed and their inventory item does not stack. Breaking a chest keeps its
+  contents inside the dropped chest item during the current play session;
+  placing that chest item restores the contents.
+- Furnaces are full-block utility blocks. They face the player when placed.
+  Right click one to open its input, fuel, and output slots in a
+  Minecraft-style furnace layout. Burning furnaces show a lit front texture,
+  and the furnace UI shows fuel and cook progress. Smelting one item takes 200
+  game ticks, or 10 seconds at the current 20 Hz tick rate.
+- Placed chest and furnace inventories survive `Save & Quit` and world reloads.
+  Furnace burn time and partially completed cook progress are saved as well.
+- Glass is produced by smelting sand.
+- Coal, oak planks, sticks, oak logs, wooden stairs, and wooden slabs are
+  furnace fuels.
+- Wooden stairs use oak plank textures and place as top or bottom stairs based
+  on the clicked face or hit height. The stair rises in the player look
+  direction. Stair orientation is saved with the chunk and survives reloading.
+- Wooden slabs use oak plank textures. Clicking a top or bottom face places a
+  horizontal slab; clicking a side face places a vertical slab against the
+  clicked block. Opposite wooden slabs in the same cell merge into oak planks.
+- Oak logs orient from the clicked face: top or bottom clicks make vertical
+  logs, east or west clicks make east-west logs, and north or south clicks make
+  north-south logs.
+- Oak leaves generated as part of trees decay over time after their supporting
+  logs are removed. Decaying or broken oak leaves have a 15% chance to drop oak
+  saplings. Oak leaves placed by the player do not decay.
+- Oak saplings can be placed on soil. They render as crossed flat plant
+  textures and grow into oak trees over time when there is enough open space
+  above them.
+- Dirt near grass can turn into grass over time when the dirt block has open
+  space above it.
+- Sand falls downward when unsupported, using a slower accelerating fall rather
+  than dropping one full block every tick.
 
 ## Movement
 

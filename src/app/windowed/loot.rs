@@ -28,6 +28,11 @@ impl ClientWorld {
         let Some(definition) = self.blocks.get(block) else {
             return;
         };
+        let chance_drop = definition
+            .behavior
+            .leaf_decay
+            .as_ref()
+            .map(|behavior| behavior.sapling_drop.clone());
         let drops: Vec<_> = definition.drops.clone();
         for drop_key in drops {
             let Some(item) = self.items.id_for_key(&drop_key) else {
@@ -44,6 +49,23 @@ impl ClientWorld {
                 LootEntity::new(ItemStack::new(item, 1), render_position).with_velocity(velocity),
             );
         }
+        if let Some(drop) = chance_drop
+            && chance_sample_for_drop(position, block) <= drop.chance
+            && let Some(item) = self.items.id_for_key(&drop.item_key)
+        {
+            self.spawn_loot_stack(ItemStack::new(item, 1), position);
+        }
+    }
+
+    pub(super) fn spawn_loot_stack(&mut self, stack: ItemStack, position: WorldBlockPosition) {
+        if stack.is_empty() {
+            return;
+        }
+        let offset = loot_spawn_offset(position, stack.item);
+        let render_position = render_position_for_world_block_center(position) + offset;
+        let velocity = Vec3::new(offset.x * 0.06, 0.12, offset.z * 0.06);
+        self.loot_entities
+            .push(LootEntity::new(stack, render_position).with_velocity(velocity));
     }
 
     pub(super) fn update_loot(&mut self, player_eye_position: Vec3, delta_seconds: f32) {
@@ -123,4 +145,13 @@ fn loot_spawn_offset(position: WorldBlockPosition, item: ItemId) -> Vec3 {
         ^ item.raw() as i64 * 2_654_435_761;
     let angle = (seed as f32).sin() * std::f32::consts::TAU;
     Vec3::new(angle.cos() * 0.12, -0.24, angle.sin() * 0.12)
+}
+
+fn chance_sample_for_drop(position: WorldBlockPosition, block: BlockId) -> f32 {
+    let seed = position.x as i64 * 73_856_093
+        ^ position.y as i64 * 19_349_663
+        ^ position.z as i64 * 83_492_791
+        ^ block.raw() as i64 * 2_654_435_761
+        ^ 0x5eed_5eed;
+    ((seed as f32).sin() * 0.5 + 0.5).clamp(0.0, 1.0)
 }

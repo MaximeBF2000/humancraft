@@ -40,6 +40,10 @@ Examples:
   `sandstone_normal.png`.
 - Crafting tables use `crafting_table_top.png`, `planks_oak.png`,
   `crafting_table_front.png`, and `crafting_table_side.png`.
+- Chests currently use generated opaque full-block faces under
+  `textures/blocks/chest/` with distinct front, back, left, right, top, and
+  bottom files. The side faces must remain opaque because the renderer treats
+  the chest as a static full cube.
 
 ## Tint Masks
 

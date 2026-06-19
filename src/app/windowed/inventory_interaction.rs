@@ -14,6 +14,7 @@ pub(super) enum InventorySlotId {
     Player(usize),
     CraftingInput(usize),
     CraftingResult,
+    Container(usize),
 }
 
 #[derive(Debug, Clone)]
@@ -26,6 +27,7 @@ pub(super) struct InventoryDrag {
     pub(super) start_cursor: Option<ItemStack>,
     pub(super) start_player_slots: Vec<Option<ItemStack>>,
     pub(super) start_crafting_slots: Vec<Option<ItemStack>>,
+    pub(super) start_container_slots: Vec<Option<ItemStack>>,
 }
 
 impl InventoryDrag {
@@ -35,6 +37,7 @@ impl InventoryDrag {
         cursor: Option<ItemStack>,
         player_inventory: &Inventory,
         crafting_grid: &Inventory,
+        container_inventory: Option<&Inventory>,
     ) -> Self {
         Self {
             button,
@@ -45,6 +48,9 @@ impl InventoryDrag {
             start_cursor: cursor,
             start_player_slots: player_inventory.slots().to_vec(),
             start_crafting_slots: crafting_grid.slots().to_vec(),
+            start_container_slots: container_inventory
+                .map(|inventory| inventory.slots().to_vec())
+                .unwrap_or_default(),
         }
     }
 
@@ -77,7 +83,9 @@ pub(super) fn left_click_inventory_slot(
             inventory.set_slot(slot_index, Some(held));
             *cursor = None;
         }
-        (Some(mut held), Some(mut slot_stack)) if held.item == slot_stack.item => {
+        (Some(mut held), Some(mut slot_stack))
+            if held.item == slot_stack.item && held.metadata == slot_stack.metadata =>
+        {
             let max_stack_size = max_stack_size(held.item, items);
             let moved = held
                 .count
@@ -114,7 +122,7 @@ pub(super) fn right_click_inventory_slot(
         slot_index,
         if stack.count == 0 { None } else { Some(stack) },
     );
-    *cursor = Some(ItemStack::new(stack.item, picked));
+    *cursor = Some(stack.with_count(picked));
 }
 
 pub(super) fn place_one_carried_item(
@@ -129,11 +137,12 @@ pub(super) fn place_one_carried_item(
     let slot = inventory.slot(slot_index);
     match slot {
         None => {
-            inventory.set_slot(slot_index, Some(ItemStack::new(held.item, 1)));
+            inventory.set_slot(slot_index, Some(held.with_count(1)));
             held.count -= 1;
         }
         Some(mut slot_stack)
             if slot_stack.item == held.item
+                && slot_stack.metadata == held.metadata
                 && slot_stack.count < max_stack_size(held.item, items) =>
         {
             slot_stack.count += 1;
@@ -159,7 +168,7 @@ pub(super) fn distribute_carried_stack_evenly(
     let mut targets: Vec<_> = slots
         .iter()
         .copied()
-        .filter(|slot| can_accept_item(inventory.slot(*slot), held.item, items))
+        .filter(|slot| can_accept_stack(inventory.slot(*slot), held, items))
         .collect();
     targets.sort_unstable();
     targets.dedup();
@@ -218,7 +227,7 @@ fn collect_from_slot(
     let Some(mut stack) = inventory.slot(slot_index) else {
         return;
     };
-    if stack.item != held.item {
+    if stack.item != held.item || stack.metadata != held.metadata {
         return;
     }
     let moved = stack.count.min(max_stack_size.saturating_sub(held.count));
@@ -275,7 +284,10 @@ fn move_stack_into_slots(
         let Some(mut existing) = inventory.slot(slot_index) else {
             continue;
         };
-        if existing.item != stack.item || existing.count >= max_stack_size {
+        if existing.item != stack.item
+            || existing.metadata != stack.metadata
+            || existing.count >= max_stack_size
+        {
             continue;
         }
         let moved = stack.count.min(max_stack_size - existing.count);
@@ -292,7 +304,7 @@ fn move_stack_into_slots(
             continue;
         }
         let moved = stack.count.min(max_stack_size);
-        inventory.set_slot(slot_index, Some(ItemStack::new(stack.item, moved)));
+        inventory.set_slot(slot_index, Some(stack.with_count(moved)));
         stack.count -= moved;
         if stack.count == 0 {
             return None;
@@ -325,7 +337,7 @@ pub(super) fn take_from_slot(
     }
     stack.count -= 1;
     inventory.set_slot(slot_index, Some(stack));
-    Some(ItemStack::new(stack.item, 1))
+    Some(stack.with_count(1))
 }
 
 pub(super) fn take_from_cursor(
@@ -339,13 +351,17 @@ pub(super) fn take_from_cursor(
     }
     stack.count -= 1;
     *cursor = Some(stack);
-    Some(ItemStack::new(stack.item, 1))
+    Some(stack.with_count(1))
 }
 
-fn can_accept_item(slot: Option<ItemStack>, item: ItemId, items: &ItemRegistry) -> bool {
+fn can_accept_stack(slot: Option<ItemStack>, stack: ItemStack, items: &ItemRegistry) -> bool {
     match slot {
         None => true,
-        Some(stack) => stack.item == item && stack.count < max_stack_size(item, items),
+        Some(existing) => {
+            existing.item == stack.item
+                && existing.metadata == stack.metadata
+                && existing.count < max_stack_size(stack.item, items)
+        }
     }
 }
 
